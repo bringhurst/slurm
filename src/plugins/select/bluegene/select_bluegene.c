@@ -42,7 +42,7 @@
 #include "bg_read_config.h"
 #include "bg_defined_block.h"
 
-#ifdef HAVE_BGQ
+#ifndef HAVE_BG_L_P
 # include "ba_bgq/block_allocator.h"
 #else
 # include "ba/block_allocator.h"
@@ -1953,24 +1953,29 @@ extern bitstr_t *select_p_step_pick_nodes(struct job_record *job_ptr,
 			if (jobinfo->units_avail)
 				used_bitmap = jobinfo->units_used;
 			else {
-				xassert((ba_mp = list_peek(
-						 bg_record->ba_mp_list)));
+				ba_mp = list_peek(bg_record->ba_mp_list);
+				xassert(ba_mp);
 				if (!ba_mp->cnode_bitmap)
 					ba_mp->cnode_bitmap =
 						ba_create_ba_mp_cnode_bitmap(
 							bg_record);
 				used_bitmap = ba_mp->cnode_bitmap;
 			}
+			/* units_used and units_avail will be the
+			   same, the exact opposite of used_bitmap.
+			*/
 			step_jobinfo->units_used = bit_copy(used_bitmap);
-			step_jobinfo->units_avail = bit_copy(used_bitmap);
 			bit_not(step_jobinfo->units_used);
+			step_jobinfo->units_avail =
+				bit_copy(step_jobinfo->units_used);
 			bit_or(used_bitmap, step_jobinfo->units_used);
 		}
 
 		step_jobinfo->ionode_str = xstrdup(jobinfo->ionode_str);
 	} else if (jobinfo->units_avail) {
 		bitstr_t *total_bitmap = jobinfo->units_used;
-		xassert((ba_mp = list_peek(bg_record->ba_mp_list)));
+		ba_mp = list_peek(bg_record->ba_mp_list);
+		xassert(ba_mp);
 		if (ba_mp->cnode_err_bitmap) {
 			total_bitmap = bit_copy(jobinfo->units_used);
 			bit_or(total_bitmap, ba_mp->cnode_err_bitmap);
@@ -2777,6 +2782,111 @@ end_it:
 #else
 	return SLURM_ERROR;
 #endif
+}
+
+/* While the realtime server should get all the cnode state changes on
+ * older versions of the IBM driver if a job has a timeout it doesn't
+ * always happen.  So what happens is the runjob_mux will now send a
+ * nice cancel to the slurmctld to make sure it gets marked.
+ */
+extern int select_p_fail_cnode(struct step_record *step_ptr)
+{
+#if defined HAVE_BG && !defined HAVE_BG_L_P
+	bg_record_t *bg_record;
+	select_nodeinfo_t *nodeinfo;
+	select_jobinfo_t *jobinfo;
+	select_jobinfo_t *step_jobinfo;
+	struct node_record *node_ptr = NULL;
+	ListIterator itr, itr2;
+	ba_mp_t *ba_mp = NULL, *found_ba_mp;
+	int i;
+
+	xassert(step_ptr);
+
+	jobinfo = step_ptr->job_ptr->select_jobinfo->data;
+	step_jobinfo = step_ptr->select_jobinfo->data;
+
+	for (i=0; i<bit_size(step_ptr->step_node_bitmap); i++) {
+		if (!bit_test(step_ptr->step_node_bitmap, i))
+			continue;
+		ba_mp = ba_inx2ba_mp(i);
+		xassert(ba_mp);
+
+		if (jobinfo->units_avail) {
+			bit_or(ba_mp->cnode_err_bitmap,
+			       step_jobinfo->units_used);
+		} else {
+			bit_nset(ba_mp->cnode_err_bitmap, 0,
+				 bit_size(ba_mp->cnode_err_bitmap)-1);
+		}
+		node_ptr = &(node_record_table_ptr[ba_mp->index]);
+		xassert(node_ptr->select_nodeinfo);
+		nodeinfo = (select_nodeinfo_t *)node_ptr->select_nodeinfo->data;
+		xassert(nodeinfo);
+		xfree(nodeinfo->failed_cnodes);
+		nodeinfo->failed_cnodes = ba_node_map_ranged_hostlist(
+			ba_mp->cnode_err_bitmap, ba_mp_geo_system);
+	}
+
+	if (!ba_mp) {
+		error("select_p_fail_cnode: no ba_mp? "
+		      "This should never happen");
+		return SLURM_ERROR;
+	}
+
+	slurm_mutex_lock(&block_state_mutex);
+	itr = list_iterator_create(bg_lists->main);
+	while ((bg_record = (bg_record_t *)list_next(itr))) {
+		if (!bit_overlap(step_ptr->step_node_bitmap,
+				 bg_record->mp_bitmap))
+			continue;
+		itr2 = list_iterator_create(bg_record->ba_mp_list);
+		while ((found_ba_mp = (ba_mp_t *)list_next(itr2))) {
+			float err_ratio;
+
+			if (!found_ba_mp->used
+			    || !bit_test(step_ptr->step_node_bitmap,
+					 found_ba_mp->index))
+				continue;
+
+			/* perhaps this block isn't involved in this
+			   error */
+			if (jobinfo->units_avail
+			    && found_ba_mp->cnode_usable_bitmap
+			    && bit_overlap(found_ba_mp->cnode_usable_bitmap,
+					   ba_mp->cnode_err_bitmap))
+					continue;
+
+			if (!found_ba_mp->cnode_err_bitmap)
+				found_ba_mp->cnode_err_bitmap =
+					bit_alloc(bg_conf->mp_cnode_cnt);
+
+			bit_or(found_ba_mp->cnode_err_bitmap,
+			       ba_mp->cnode_err_bitmap);
+			bg_record->cnode_err_cnt =
+				bit_set_count(found_ba_mp->cnode_err_bitmap);
+
+
+			err_ratio = (float)bg_record->cnode_err_cnt
+				/ (float)bg_record->cnode_cnt;
+                        bg_record->err_ratio = err_ratio * 100;
+
+			/* handle really small ratios */
+			if (!bg_record->err_ratio && bg_record->cnode_err_cnt)
+				bg_record->err_ratio = 1;
+
+			debug("select_p_fail_cnode: "
+			      "count in error for %s is %u with ratio at %u",
+			      bg_record->bg_block_id,
+			      bg_record->cnode_err_cnt,
+			      bg_record->err_ratio);
+		}
+		list_iterator_destroy(itr2);
+	}
+	list_iterator_destroy(itr);
+	slurm_mutex_unlock(&block_state_mutex);
+#endif
+	return SLURM_SUCCESS;
 }
 
 extern int select_p_get_info_from_plugin (enum select_plugindata_info dinfo,

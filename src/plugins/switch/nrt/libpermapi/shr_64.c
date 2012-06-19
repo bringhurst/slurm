@@ -42,7 +42,6 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 
-#include "src/common/slurm_xlator.h"
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
@@ -54,134 +53,29 @@
 #include "src/common/xstring.h"
 #include "src/common/list.h"
 #include "src/common/hostlist.h"
+#include "src/common/plugstack.h"
 
-#include "src/srun/srun_job.h"
-#include "src/srun/opt.h"
-#include "src/srun/allocate.h"
-#include "src/srun/launch.h"
+#include "src/srun/libsrun/srun_job.h"
+#include "src/srun/libsrun/opt.h"
+#include "src/srun/libsrun/allocate.h"
+#include "src/srun/libsrun/launch.h"
 #include "src/plugins/switch/nrt/nrt_keys.h"
 
-void *my_handle = NULL;
-srun_job_t *job = NULL;
+bool srun_max_timer = false;
+bool srun_shutdown  = false;
+
+static void *my_handle = NULL;
+static srun_job_t *job = NULL;
+static int debug_level = 0;
+static bool got_alloc = false;
+static bool slurm_started = false;
+static log_options_t log_opts = LOG_OPTS_INITIALIZER;
 
 int sig_array[] = {
 	SIGINT,  SIGQUIT, SIGCONT, SIGTERM, SIGHUP,
 	SIGALRM, SIGUSR1, SIGUSR2, SIGPIPE, 0 };
 
 extern char **environ;
-
-static int
-_is_local_file (fname_t *fname)
-{
-	if (fname->name == NULL)
-		return 1;
-
-	if (fname->taskid != -1)
-		return 1;
-
-	return ((fname->type != IO_PER_TASK) && (fname->type != IO_ONE));
-}
-
-static slurm_step_layout_t *
-_get_slurm_step_layout(srun_job_t *job)
-{
-	job_step_create_response_msg_t *resp;
-
-	if (!job || !job->step_ctx)
-		return (NULL);
-
-	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &resp);
-	if (!resp)
-	    return (NULL);
-	return (resp->step_layout);
-}
-
-static void
-_set_stdio_fds(srun_job_t *job, slurm_step_io_fds_t *cio_fds)
-{
-	bool err_shares_out = false;
-	int file_flags;
-
-	if (opt.open_mode == OPEN_MODE_APPEND)
-		file_flags = O_CREAT|O_WRONLY|O_APPEND;
-	else if (opt.open_mode == OPEN_MODE_TRUNCATE)
-		file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
-	else {
-		slurm_ctl_conf_t *conf;
-		conf = slurm_conf_lock();
-		if (conf->job_file_append)
-			file_flags = O_CREAT|O_WRONLY|O_APPEND;
-		else
-			file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
-		slurm_conf_unlock();
-	}
-
-	/*
-	 * create stdin file descriptor
-	 */
-	if (_is_local_file(job->ifname)) {
-		if ((job->ifname->name == NULL) ||
-		    (job->ifname->taskid != -1)) {
-			cio_fds->in.fd = STDIN_FILENO;
-		} else {
-			cio_fds->in.fd = open(job->ifname->name, O_RDONLY);
-			if (cio_fds->in.fd == -1) {
-				error("Could not open stdin file: %m");
-				exit(error_exit);
-			}
-		}
-		if (job->ifname->type == IO_ONE) {
-			cio_fds->in.taskid = job->ifname->taskid;
-			cio_fds->in.nodeid = slurm_step_layout_host_id(
-				_get_slurm_step_layout(job),
-				job->ifname->taskid);
-		}
-	}
-
-	/*
-	 * create stdout file descriptor
-	 */
-	if (_is_local_file(job->ofname)) {
-		if ((job->ofname->name == NULL) ||
-		    (job->ofname->taskid != -1)) {
-			cio_fds->out.fd = STDOUT_FILENO;
-		} else {
-			cio_fds->out.fd = open(job->ofname->name,
-					       file_flags, 0644);
-			if (cio_fds->out.fd == -1) {
-				error("Could not open stdout file: %m");
-				exit(error_exit);
-			}
-		}
-		if (job->ofname->name != NULL
-		    && job->efname->name != NULL
-		    && !strcmp(job->ofname->name, job->efname->name)) {
-			err_shares_out = true;
-		}
-	}
-
-	/*
-	 * create seperate stderr file descriptor only if stderr is not sharing
-	 * the stdout file descriptor
-	 */
-	if (err_shares_out) {
-		debug3("stdout and stderr sharing a file");
-		cio_fds->err.fd = cio_fds->out.fd;
-		cio_fds->err.taskid = cio_fds->out.taskid;
-	} else if (_is_local_file(job->efname)) {
-		if ((job->efname->name == NULL) ||
-		    (job->efname->taskid != -1)) {
-			cio_fds->err.fd = STDERR_FILENO;
-		} else {
-			cio_fds->err.fd = open(job->efname->name,
-					       file_flags, 0644);
-			if (cio_fds->err.fd == -1) {
-				error("Could not open stderr file: %m");
-				exit(error_exit);
-			}
-		}
-	}
-}
 
 static nrt_job_key_t _get_nrt_job_key(srun_job_t *job)
 {
@@ -225,70 +119,59 @@ extern int pe_rm_connect(rmhandle_t resource_mgr,
 {
 	srun_job_t **job_ptr = (srun_job_t **)resource_mgr;
 	srun_job_t *job = *job_ptr;
-	slurm_step_launch_params_t launch_params;
 	int my_argc = 1;
-	char **my_argv = xmalloc(sizeof(char *)*my_argc+1);
-	my_argv[0] = xstrdup("/etc/pmdv12");
+	char *my_argv[2] = { connect_param->executable, NULL };
+//	char *my_argv[2] = { "/bin/hostname", NULL };
+	slurm_step_io_fds_t cio_fds = SLURM_STEP_IO_FDS_INITIALIZER;
+	uint32_t global_rc = 0;
+	int i, rc, fd_cnt;
+	int *ctx_sockfds = NULL;
 
-	info("got pe_rm_connect called %p %d", rm_sockfds, rm_sockfds[0]);
+	debug("got pe_rm_connect called");
 
-	slurm_step_launch_params_t_init(&launch_params);
-	launch_params.gid = opt.gid;
-	launch_params.alias_list = job->alias_list;
-	launch_params.argc = my_argc;
-	launch_params.argv = my_argv;
-	launch_params.multi_prog = opt.multi_prog ? true : false;
-	launch_params.cwd = opt.cwd;
-	launch_params.slurmd_debug = opt.slurmd_debug;
-	launch_params.buffered_stdio = !opt.unbuffered;
-	launch_params.labelio = opt.labelio ? true : false;
-	launch_params.remote_output_filename =fname_remote_string(job->ofname);
-	launch_params.remote_input_filename = fname_remote_string(job->ifname);
-	launch_params.remote_error_filename = fname_remote_string(job->efname);
-	launch_params.task_prolog = opt.task_prolog;
-	launch_params.task_epilog = opt.task_epilog;
-	launch_params.cpu_bind = opt.cpu_bind;
-	launch_params.cpu_bind_type = opt.cpu_bind_type;
-	launch_params.mem_bind = opt.mem_bind;
-	launch_params.mem_bind_type = opt.mem_bind_type;
-	launch_params.open_mode = opt.open_mode;
-	if (opt.acctg_freq >= 0)
-		launch_params.acctg_freq = opt.acctg_freq;
-	launch_params.pty = opt.pty;
-	launch_params.cpus_per_task	= 1;
-	launch_params.task_dist         = opt.distribution;
-	launch_params.ckpt_dir		= opt.ckpt_dir;
-	launch_params.restart_dir       = opt.restart_dir;
-	launch_params.preserve_env      = opt.preserve_env;
-	launch_params.spank_job_env     = opt.spank_job_env;
-	launch_params.spank_job_env_size = opt.spank_job_env_size;
+	opt.argc = my_argc;
+	opt.argv = my_argv;
+	opt.user_managed_io = true;
 
-	_set_stdio_fds(job, &launch_params.local_fds);
-	rm_sockfds[0] = launch_params.local_fds.in.fd;
-	rm_sockfds[1] = launch_params.local_fds.out.fd;
-	rm_sockfds[2] = launch_params.local_fds.err.fd;
-
-	launch_params.parallel_debug = false;
-
-	update_job_state(job, SRUN_JOB_LAUNCHING);
-	if (slurm_step_launch(job->step_ctx, &launch_params, NULL) !=
-	    SLURM_SUCCESS) {
-		error("Application launch failed: %m");
-		slurm_step_launch_wait_finish(job->step_ctx);
-		goto cleanup;
+	launch_common_set_stdio_fds(job, &cio_fds);
+	if (slurm_step_ctx_daemon_per_node_hack(job->step_ctx,
+						connect_param->machine_name,
+						connect_param->machine_count)
+	    != SLURM_SUCCESS) {
+		*error_msg = xstrdup_printf(
+			"pe_rm_connect: problem with hack");
+		error("%s", *error_msg);
+		return -1;
 	}
 
-	update_job_state(job, SRUN_JOB_STARTING);
-	if (slurm_step_launch_wait_start(job->step_ctx) == SLURM_SUCCESS) {
-		update_job_state(job, SRUN_JOB_RUNNING);
-	} else {
-		info("Job step %u.%u aborted before step completely launched.",
-		     job->jobid, job->stepid);
+	if (launch_g_step_launch(job, &cio_fds, &global_rc)) {
+		*error_msg = xstrdup_printf(
+			"pe_rm_connect: problem with launch");
+		error("%s", *error_msg);
+		return -1;
 	}
-cleanup:
-	xfree(my_argv[0]);
-	xfree(my_argv);
-	info("done launching");
+
+	rc = slurm_step_ctx_get(job->step_ctx,
+				SLURM_STEP_CTX_USER_MANAGED_SOCKETS,
+				&fd_cnt, &ctx_sockfds);
+	if (ctx_sockfds == NULL) {
+		*error_msg = xstrdup_printf(
+			"pe_rm_connect: Unable to get pmd IO socket array %d",
+			rc);
+		error("%s", *error_msg);
+		return -1;
+	}
+	if (fd_cnt != connect_param->machine_count) {
+		*error_msg = xstrdup_printf(
+			"pe_rm_connect: looking for %d sockets but got back %d",
+			connect_param->machine_count, fd_cnt);
+		error("%s", *error_msg);
+		return -1;
+	}
+
+	for (i=0; i<fd_cnt; i++)
+		rm_sockfds[i] = ctx_sockfds[i];
+
 	return 0;
 }
 
@@ -300,14 +183,29 @@ cleanup:
  */
 extern void pe_rm_free(rmhandle_t *resource_mgr)
 {
-	//srun_job_t *job = (srun_job_t *)*resource_mgr;
-       	/* We are at the end so don't worry about freeing the
-	   srun_job_t pointer */
-	resource_mgr = NULL;
+	uint32_t rc = 0;
+	srun_job_t **job_ptr;
+	srun_job_t *job;
 
+	/* If the PMD calls this and it didn't launch anything we need
+	 * to not do anything here or PMD will crap out on it. */
+	if (!resource_mgr || !*resource_mgr)
+		return;
+	job_ptr = (srun_job_t **)*resource_mgr;
+	job = *job_ptr;
+	if (!job)
+		return;
+
+	/* OK we are now really running something */
+	debug("got pe_rm_free called %p %p", job, job->step_ctx);
+	if (launch_g_step_wait(job, got_alloc) != -1) {
+		/* We are at the end so don't worry about freeing the
+		   srun_job_t pointer */
+		fini_srun(job, got_alloc, &rc, 0, slurm_started);
+	}
+
+	*resource_mgr = NULL;
 	dlclose(my_handle);
-	info("got pe_rm_free called");
-
 }
 
 /* The memory that is allocated to events generated by the resource
@@ -321,7 +219,7 @@ extern void pe_rm_free(rmhandle_t *resource_mgr)
  */
 extern int pe_rm_free_event(rmhandle_t resource_mgr, job_event_t ** job_event)
 {
-	info("got pe_rm_free_event called");
+	debug("got pe_rm_free_event called");
 	if (job_event) {
 		xfree(*job_event);
 	}
@@ -391,8 +289,8 @@ extern int pe_rm_get_event(rmhandle_t resource_mgr, job_event_t **job_event,
 {
 	job_event_t *ret_event = NULL;
 	int *state;
-	info("got pe_rm_get_event called %d %p %p", rm_timeout,
-	     job_event, *job_event);
+	debug("got pe_rm_get_event called %d %p %p",
+	      rm_timeout, job_event, *job_event);
 
 	ret_event = xmalloc(sizeof(job_event_t));
 	*job_event = ret_event;
@@ -441,8 +339,9 @@ extern int pe_rm_get_job_info(rmhandle_t resource_mgr, job_info_t **job_info,
 	slurm_step_layout_t *step_layout;
 	hostlist_t hl;
 	char *host;
+	host_usage_t *host_ptr;
 
-	info("got pe_rm_get_job_info called %p %p", job_info, *job_info);
+	debug("got pe_rm_get_job_info called %p %p", job_info, *job_info);
 
 	*job_info = ret_info;
 
@@ -456,39 +355,44 @@ extern int pe_rm_get_job_info(rmhandle_t resource_mgr, job_info_t **job_info,
 	ret_info->protocol[0] = xstrdup(opt.mpi_type);
 	ret_info->mode = xmalloc(sizeof(char *)*2);
 	ret_info->mode[0] = xstrdup(opt.network);
-	ret_info->instance = xmalloc(sizeof(int));
-	*ret_info->instance = 1;
+	ret_info->instance = xmalloc(sizeof(int)*3);
+	ret_info->instance[0] = 1;
+	ret_info->instance[1] = -1;
 /* FIXME: not sure how to handle devicename yet */
 	ret_info->devicename = xmalloc(sizeof(char *)*2);
-	ret_info->devicename[0] = xstrdup("sn_all");
+	ret_info->devicename[0] = xstrdup("mlx4_0");
 	ret_info->num_network = 1;
 	ret_info->host_count = job->nhosts;
 
 	step_layout = launch_common_get_slurm_step_layout(job);
 
 	ret_info->hosts = xmalloc(sizeof(host_usage_t) * ret_info->host_count);
+	host_ptr = ret_info->hosts;
 	i=0;
 	hl = hostlist_create(step_layout->node_list);
 	while ((host = hostlist_shift(hl))) {
 		slurm_addr_t addr;
-		ret_info->hosts->host_name = host;
+		host_ptr->host_name = host;
 /* FIXME: not sure how to handle host_address yet we are guessing the
  * below will do what we need. */
-		/* ret_info->hosts->host_address = */
+		/* host_ptr->host_address = */
 		/* 	xstrdup_printf("10.0.0.5%d", i+1); */
 		slurm_conf_get_addr(host, &addr);
-		ret_info->hosts->host_address = inet_ntoa(addr.sin_addr);
-		info("%s = %s", ret_info->hosts->host_name, ret_info->hosts->host_address);
-		ret_info->hosts->task_count = step_layout->tasks[i];
-		ret_info->hosts->task_ids =
-			xmalloc(sizeof(int) * ret_info->hosts->task_count);
-		for (j=0; j<ret_info->hosts->task_count; j++)
-			ret_info->hosts->task_ids[j] = task_id++;
+		host_ptr->host_address = xstrdup(inet_ntoa(addr.sin_addr));
+		host_ptr->task_count = step_layout->tasks[i];
+		host_ptr->task_ids =
+			xmalloc(sizeof(int) * host_ptr->task_count);
+		for (j=0; j<host_ptr->task_count; j++)
+			host_ptr->task_ids[j] = task_id++;
+		debug3("%s = %s %d tasks",
+		       host_ptr->host_name, host_ptr->host_address,
+		       host_ptr->task_count);
 		i++;
 		if (i > ret_info->host_count) {
 			error("we have more nodes that we bargined for.");
 			break;
 		}
+		host_ptr++;
 	}
 	hostlist_destroy(hl);
 
@@ -557,6 +461,8 @@ extern int pe_rm_get_job_info(rmhandle_t resource_mgr, job_info_t **job_info,
 extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 		      char** error_msg)
 {
+	char *srun_debug = NULL;
+
 	/* SLURM was originally written against 1300, so we will
 	 * return that, no matter what comes in so we always work.
 	 */
@@ -575,11 +481,29 @@ extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 #else
 	fatal("I haven't been told where I am.  This should never happen.");
 #endif
-	info("got pe_rm_init called %s", rm_id);
+	debug("got pe_rm_init called %s", rm_id);
+
+	if (slurm_select_init(1) != SLURM_SUCCESS )
+		fatal( "failed to initialize node selection plugin" );
 
 	/* Set up slurmctld message handler */
 	slurmctld_msg_init();
 	slurm_set_launch_type("launch/slurm");
+
+	if ((srun_debug = getenv("SRUN_DEBUG")))
+		debug_level = atoi(srun_debug);
+	if (debug_level) {
+		log_opts.stderr_level  = debug_level;
+		log_opts.logfile_level = debug_level;
+		log_opts.syslog_level  = debug_level;
+
+		log_alter(log_opts, LOG_DAEMON, "/dev/null");
+	}
+
+	/* This will be used later in the code to set the _verbose level. */
+	if (debug_level >= LOG_LEVEL_INFO)
+		debug_level -= LOG_LEVEL_INFO;
+
 	return 0;
 }
 
@@ -602,7 +526,7 @@ extern int pe_rm_init(int *rmapi_version, rmhandle_t *resource_mgr, char *rm_id,
 extern int pe_rm_send_event(rmhandle_t resource_mgr, job_event_t *job_event,
 			    char ** error_msg)
 {
-	info("got pe_rm_send_event called");
+	debug("got pe_rm_send_event called");
 	return 0;
 }
 
@@ -623,159 +547,62 @@ extern int pe_rm_send_event(rmhandle_t resource_mgr, job_event_t *job_event,
 int pe_rm_submit_job(rmhandle_t resource_mgr, job_command_t job_cmd,
 		     char** error_msg)
 {
-	resource_allocation_response_msg_t *resp;
 	job_request_t *pe_job_req = NULL;
 	char *myargv[3] = { "poe", "poe", NULL };
 
-	info("got pe_rm_submit_job called %d", job_cmd.job_format);
+	if (getenv("SLURM_STARTED_STEP"))
+		slurm_started = true;
+
+	debug("got pe_rm_submit_job called %d", job_cmd.job_format);
 	if (job_cmd.job_format != 1) {
 		/* We don't handle files */
 		error("SLURM doesn't handle files to submit_job");
-		return 1;
+		return -1;
 	}
 
+	init_srun(2, myargv, &log_opts, debug_level, 1);
+
 	pe_job_req = (job_request_t *)job_cmd.job_command;
+	debug2("num_nodes\t= %d", pe_job_req->num_nodes);
+	debug2("tasks_per_node\t= %d", pe_job_req->tasks_per_node);
+	debug2("total_tasks\t= %d", pe_job_req->total_tasks);
+	debug2("usage_mode\t= %d", pe_job_req->node_usage);
+	debug2("network_usage protocols\t= %s",
+	       pe_job_req->network_usage.protocols);
+	debug2("network_usage adapter_usage\t= %s",
+	       pe_job_req->network_usage.adapter_usage);
+	debug2("network_usage adapter_type\t= %s",
+	       pe_job_req->network_usage.adapter_type);
+	debug2("network_usage mode\t= %s", pe_job_req->network_usage.mode);
+	debug2("network_usage instance\t= %s",
+	       pe_job_req->network_usage.instances);
+	debug2("network_usage dev_type\t= %s",
+	       pe_job_req->network_usage.dev_type);
+	debug2("check_pointable\t= %d", pe_job_req->check_pointable);
+	debug2("check_dir\t= %s", pe_job_req->check_dir);
+	debug2("task_affinity\t= %s", pe_job_req->task_affinity);
+	debug2("pthreads\t= %d", pe_job_req->parallel_threads);
+	debug2("save_job\t= %s", pe_job_req->save_job_file);
+	debug2("require\t= %s", pe_job_req->requirements);
+	debug2("node_topology\t= %s", pe_job_req->node_topology);
+	debug2("pool\t= %s", pe_job_req->pool);
 
-	initialize_and_process_args(2, myargv);
-	info("job_type\t= %d", pe_job_req->job_type);
-
-	info("num_nodes\t= %d", pe_job_req->num_nodes);
 	if (pe_job_req->num_nodes != -1)
 		opt.max_nodes = opt.min_nodes = pe_job_req->num_nodes;
 
-	info("tasks_per_node\t= %d", pe_job_req->tasks_per_node);
 	if (pe_job_req->tasks_per_node != -1)
 		opt.ntasks_per_node = pe_job_req->tasks_per_node;
 
-	info("total_tasks\t= %d", pe_job_req->total_tasks);
 	if (pe_job_req->total_tasks != -1) {
 		opt.ntasks_set = true;
 		opt.ntasks = pe_job_req->total_tasks;
 	}
 
-	info("usage_mode\t= %d", pe_job_req->node_usage);
-
-	info("network_usage protocols\t= %s", pe_job_req->network_usage.protocols);
+	xfree(opt.mpi_type);
 	opt.mpi_type = xstrdup(pe_job_req->network_usage.protocols);
-	info("network_usage adapter_usage\t= %s", pe_job_req->network_usage.adapter_usage);
-	info("network_usage adapter_type\t= %s", pe_job_req->network_usage.adapter_type);
-	info("network_usage mode\t= %s", pe_job_req->network_usage.mode);
+	xfree(opt.network);
 	opt.network = xstrdup(pe_job_req->network_usage.mode);
-	info("network_usage instance\t= %s", pe_job_req->network_usage.instances);
-	info("network_usage dev_type\t= %s", pe_job_req->network_usage.dev_type);
 
-	info("check_pointable\t= %d", pe_job_req->check_pointable);
-
-	info("check_dir\t= %s", pe_job_req->check_dir);
-
-	info("task_affinity\t= %s", pe_job_req->task_affinity);
-
-	info("pthreads\t= %d", pe_job_req->parallel_threads);
-
-	/* info("pool\t= %s", pe_job_req->pool); */
-	/* opt.partition = xstrdup(pe_job_req->pool); */
-
-	info("save_job\t= %s", pe_job_req->save_job_file);
-
-	info("require\t= %s", pe_job_req->requirements);
-
-	info("node_topology\t= %s", pe_job_req->node_topology);
-/* 	/\* now global "opt" should be filled in and available, */
-/* 	 * create a job from opt */
-/* 	 *\/ */
-/* 	if (opt.test_only) { */
-/* 		int rc = allocate_test(); */
-/* 		if (rc) { */
-/* 			slurm_perror("allocation failure"); */
-/* 			exit (1); */
-/* 		} */
-/* 		exit (0); */
-
-/* 	} else if (opt.no_alloc) { */
-/* 		info("do not allocate resources"); */
-/* 		job = job_create_noalloc(); */
-/* 		if (create_job_step(job, false) < 0) { */
-/* 			exit(error_exit); */
-/* 		} */
-	if ((resp = existing_allocation())) {
-		if (opt.nodes_set_env && !opt.nodes_set_opt &&
-		    (opt.min_nodes > resp->node_cnt)) {
-			/* This signifies the job used the --no-kill option
-			 * and a node went DOWN or it used a node count range
-			 * specification, was checkpointed from one size and
-			 * restarted at a different size */
-			error("SLURM_NNODES environment varariable "
-			      "conflicts with allocated node count (%u!=%u).",
-			      opt.min_nodes, resp->node_cnt);
-			/* Modify options to match resource allocation.
-			 * NOTE: Some options are not supported */
-			opt.min_nodes = resp->node_cnt;
-			xfree(opt.alloc_nodelist);
-			if (!opt.ntasks_set)
-				opt.ntasks = opt.min_nodes;
-		}
-		if (opt.alloc_nodelist == NULL)
-			opt.alloc_nodelist = xstrdup(resp->node_list);
-		/* if (opt.exclusive) */
-		/* 	_step_opt_exclusive(); */
-		//_set_env_vars(resp);
-		//if (_validate_relative(resp))
-		//	exit(error_exit);
-		job = job_step_create_allocation(resp);
-		slurm_free_resource_allocation_response_msg(resp);
-
-		if (opt.begin != 0) {
-			error("--begin is ignored because nodes"
-			      " are already allocated.");
-		}
-		if (!job || create_job_step(job, false) < 0)
-			exit(error_exit);
-	} else {
-		/* Combined job allocation and job step launch */
-		if (opt.relative_set && opt.relative) {
-			fatal("--relative option invalid for job allocation "
-			      "request");
-		}
-
-		if (!opt.job_name_set_env && opt.job_name_set_cmd)
-			setenvfs("SLURM_JOB_NAME=%s", opt.job_name);
-		else if (!opt.job_name_set_env && opt.argc)
-			setenvfs("SLURM_JOB_NAME=%s", opt.argv[0]);
-
-		if ( !(resp = allocate_nodes()) )
-			return error_exit;
-
-		//got_alloc = true;
-		//_print_job_information(resp);
-		//_set_env_vars(resp);
-		/* if (_validate_relative(resp)) { */
-		/* 	slurm_complete_job(resp->job_id, 1); */
-		/* 	return error_exit; */
-		/* } */
-		job = job_create_allocation(resp);
-
-		opt.exclusive = false;	/* not applicable for this step */
-		opt.time_limit = NO_VAL;/* not applicable for step, only job */
-		xfree(opt.constraints);	/* not applicable for this step */
-		if (!opt.job_name_set_cmd && opt.job_name_set_env) {
-			/* use SLURM_JOB_NAME env var */
-			opt.job_name_set_cmd = true;
-		}
-
-		/*
-		 *  Become --uid user
-		 */
-		/* if (_become_user () < 0) */
-		/* 	info("Warning: Unable to assume uid=%u", opt.uid); */
-
-		if (!job || create_job_step(job, true) < 0) {
-			slurm_complete_job(resp->job_id, 1);
-			return error_exit;
-		}
-
-		slurm_free_resource_allocation_response_msg(resp);
-	}
-		//*resource_mgr = (void *)job;
+	create_srun_job(&job, &got_alloc, slurm_started);
 	return 0;
 }
-

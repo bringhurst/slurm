@@ -44,9 +44,9 @@
 #include <string.h>
 
 #include "src/api/pmi_server.h"
-#include "src/srun/allocate.h"
-#include "src/srun/launch.h"
-#include "src/srun/multi_prog.h"
+#include "src/srun/libsrun/allocate.h"
+#include "src/srun/libsrun/launch.h"
+#include "src/srun/libsrun/multi_prog.h"
 
 #include "src/plugins/launch/slurm/task_state.h"
 
@@ -391,8 +391,7 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 }
 
 extern int launch_p_step_launch(
-	srun_job_t *job, slurm_step_io_fds_t *cio_fds,
-	uint32_t *global_rc, bool got_alloc)
+	srun_job_t *job, slurm_step_io_fds_t *cio_fds, uint32_t *global_rc)
 {
 	slurm_step_launch_params_t launch_params;
 	slurm_step_launch_callbacks_t callbacks;
@@ -436,6 +435,7 @@ extern int launch_p_step_launch(
 	launch_params.preserve_env      = opt.preserve_env;
 	launch_params.spank_job_env     = opt.spank_job_env;
 	launch_params.spank_job_env_size = opt.spank_job_env_size;
+	launch_params.user_managed_io   = opt.user_managed_io;
 
 	memcpy(&launch_params.local_fds, cio_fds, sizeof(slurm_step_io_fds_t));
 
@@ -481,6 +481,15 @@ extern int launch_p_step_launch(
 		     job->jobid, job->stepid);
 	}
 
+cleanup:
+
+	return rc;
+}
+
+extern int launch_p_step_wait(srun_job_t *job, bool got_alloc)
+{
+	int rc = 0;
+
 	slurm_step_launch_wait_finish(job->step_ctx);
 	if ((MPIR_being_debugged == 0) && retry_step_begin &&
 	    (retry_step_cnt < MAX_STEP_RETRIES)) {
@@ -496,8 +505,6 @@ extern int launch_p_step_launch(
 		task_state_destroy(task_state);
 		rc = -1;
 	}
-cleanup:
-
 	return rc;
 }
 

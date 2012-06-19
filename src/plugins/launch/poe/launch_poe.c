@@ -44,7 +44,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "src/srun/launch.h"
+#include "src/srun/libsrun/launch.h"
 #include "src/common/env.h"
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -591,11 +591,11 @@ static char *_build_poe_command(uint32_t job_id)
 	}
 	if (opt.immediate)
 		setenv("MP_RETRY", "0", 1);
-	if (_verbose) {
-		int info_level = MIN((_verbose + 1), 6);
-		snprintf(value, sizeof(value), "%d", info_level);
-		setenv("MP_INFOLEVEL", value, 1);
-	}
+	/* if (_verbose) { */
+	/* 	int info_level = MIN((_verbose + 1), 6); */
+	/* 	snprintf(value, sizeof(value), "%d", info_level); */
+	/* 	setenv("MP_INFOLEVEL", value, 1); */
+	/* } */
 	if (opt.labelio)
 		setenv("MP_LABELIO", "yes", 0);
 	if (!strcmp(protocol, "multi"))
@@ -644,6 +644,7 @@ static char *_build_poe_command(uint32_t job_id)
 	   really needs to have RMPOOL set just set it to something.
 	*/
 	setenv("MP_RMPOOL", "SLURM", 1);
+	setenv("SLURM_STARTED_STEP", "YES", 1);
 	//disable_status = opt.disable_status;
 	//quit_on_intr = opt.quit_on_intr;
 	//srun_jobid = xstrdup(opt.jobid);
@@ -712,8 +713,7 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 }
 
 extern int launch_p_step_launch(
-	srun_job_t *job, slurm_step_io_fds_t *cio_fds,
-	uint32_t *global_rc, bool got_alloc)
+	srun_job_t *job, slurm_step_io_fds_t *cio_fds, uint32_t *global_rc)
 {
 	int rc = 0;
 	pid_t pid;
@@ -726,7 +726,7 @@ extern int launch_p_step_launch(
 		error("pipe: %m");
 		return 1;
 	}
-	info("calling %s", opt.argv[0]);
+
 	pid = fork();
 	if (pid < 0) {
 		/* (void) close(stdin_pipe[0]); */
@@ -764,11 +764,14 @@ extern int launch_p_step_launch(
 	(void) close(stdout_pipe[1]);
 	(void) close(stderr_pipe[1]);
 
-	info("partition = %s", opt.partition);
 	/* NOTE: dummy_pipe is only used to wake the select() function in the
 	 * loop below when the spawned process terminates */
-	info("done with exec");
 	return rc;
+}
+
+extern int launch_p_step_wait(srun_job_t *job, bool got_alloc)
+{
+	return 0;
 }
 
 extern int launch_p_step_terminate(void)
@@ -777,7 +780,6 @@ extern int launch_p_step_terminate(void)
 		(void) unlink(cmd_fname);
 	if (stepid_fname)
 		(void) unlink(stepid_fname);
-	info("finishing");
 	return SLURM_SUCCESS;
 }
 

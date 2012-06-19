@@ -1,42 +1,42 @@
- /*  launch.c - Define job launch plugin functions.
- *****************************************************************************
- *  Copyright (C) 2012 SchedMD LLC
- *  Written by Danny Auble <da@schedmd.com>
- *
- *  This file is part of SLURM, a resource management program.
- *  For details, see <http://www.schedmd.com/slurmdocs/>.
- *  Please also read the included file: DISCLAIMER.
- *
- *  SLURM is free software; you can redistribute it and/or modify it under
- *  the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  In addition, as a special exception, the copyright holders give permission
- *  to link the code of portions of this program with the OpenSSL library under
- *  certain conditions as described in each individual source file, and
- *  distribute linked combinations including the two. You must obey the GNU
- *  General Public License in all respects for all of the code used other than
- *  OpenSSL. If you modify file(s) with this exception, you may extend this
- *  exception to your version of the file(s), but you are not obligated to do
- *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in
- *  the program, then also delete it here.
- *
- *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
- *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
- *  details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with SLURM; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+/*  launch.c - Define job launch plugin functions.
+*****************************************************************************
+*  Copyright (C) 2012 SchedMD LLC
+*  Written by Danny Auble <da@schedmd.com>
+*
+*  This file is part of SLURM, a resource management program.
+*  For details, see <http://www.schedmd.com/slurmdocs/>.
+*  Please also read the included file: DISCLAIMER.
+*
+*  SLURM is free software; you can redistribute it and/or modify it under
+*  the terms of the GNU General Public License as published by the Free
+*  Software Foundation; either version 2 of the License, or (at your option)
+*  any later version.
+*
+*  In addition, as a special exception, the copyright holders give permission
+*  to link the code of portions of this program with the OpenSSL library under
+*  certain conditions as described in each individual source file, and
+*  distribute linked combinations including the two. You must obey the GNU
+*  General Public License in all respects for all of the code used other than
+*  OpenSSL. If you modify file(s) with this exception, you may extend this
+*  exception to your version of the file(s), but you are not obligated to do
+*  so. If you do not wish to do so, delete this exception statement from your
+*  version.  If you delete this exception statement from all source files in
+*  the program, then also delete it here.
+*
+*  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
+*  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+*  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+*  details.
+*
+*  You should have received a copy of the GNU General Public License along
+*  with SLURM; if not, write to the Free Software Foundation, Inc.,
+*  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
 #include <stdlib.h>
 #include <fcntl.h>
 
-#include "src/srun/launch.h"
+#include "launch.h"
 
 #include "src/common/env.h"
 #include "src/common/xstring.h"
@@ -51,7 +51,8 @@ typedef struct {
 				    sig_atomic_t *destroy_job);
 	int (*step_launch)         (srun_job_t *job,
 				    slurm_step_io_fds_t *cio_fds,
-				    uint32_t *global_rc, bool got_alloc);
+				    uint32_t *global_rc);
+	int (*step_wait)           (srun_job_t *job, bool got_alloc);
 	int (*step_terminate)      (void);
 	void (*print_status)       (void);
 	void (*fwd_signal)         (int signal);
@@ -64,6 +65,7 @@ static const char *syms[] = {
 	"launch_p_setup_srun_opt",
 	"launch_p_create_job_step",
 	"launch_p_step_launch",
+	"launch_p_step_wait",
 	"launch_p_step_terminate",
 	"launch_p_print_status",
 	"launch_p_fwd_signal"
@@ -72,6 +74,18 @@ static const char *syms[] = {
 static plugin_ops_t ops;
 static plugin_context_t *plugin_context = NULL;
 static pthread_mutex_t plugin_context_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int
+_is_local_file (fname_t *fname)
+{
+	if (fname->name == NULL)
+		return 1;
+
+	if (fname->taskid != -1)
+		return 1;
+
+	return ((fname->type != IO_PER_TASK) && (fname->type != IO_ONE));
+}
 
 /*
  * Initialize context for plugin
@@ -129,7 +143,7 @@ extern slurm_step_layout_t *launch_common_get_slurm_step_layout(srun_job_t *job)
 
 	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_RESP, &resp);
 	if (!resp)
-	    return (NULL);
+		return (NULL);
 	return (resp->step_layout);
 }
 
@@ -321,6 +335,93 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	return SLURM_SUCCESS;
 }
 
+extern void launch_common_set_stdio_fds(srun_job_t *job,
+					slurm_step_io_fds_t *cio_fds)
+{
+	bool err_shares_out = false;
+	int file_flags;
+
+	if (opt.open_mode == OPEN_MODE_APPEND)
+		file_flags = O_CREAT|O_WRONLY|O_APPEND;
+	else if (opt.open_mode == OPEN_MODE_TRUNCATE)
+		file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
+	else {
+		slurm_ctl_conf_t *conf;
+		conf = slurm_conf_lock();
+		if (conf->job_file_append)
+			file_flags = O_CREAT|O_WRONLY|O_APPEND;
+		else
+			file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
+		slurm_conf_unlock();
+	}
+
+	/*
+	 * create stdin file descriptor
+	 */
+	if (_is_local_file(job->ifname)) {
+		if ((job->ifname->name == NULL) ||
+		    (job->ifname->taskid != -1)) {
+			cio_fds->in.fd = STDIN_FILENO;
+		} else {
+			cio_fds->in.fd = open(job->ifname->name, O_RDONLY);
+			if (cio_fds->in.fd == -1) {
+				error("Could not open stdin file: %m");
+				exit(error_exit);
+			}
+		}
+		if (job->ifname->type == IO_ONE) {
+			cio_fds->in.taskid = job->ifname->taskid;
+			cio_fds->in.nodeid = slurm_step_layout_host_id(
+				launch_common_get_slurm_step_layout(job),
+				job->ifname->taskid);
+		}
+	}
+
+	/*
+	 * create stdout file descriptor
+	 */
+	if (_is_local_file(job->ofname)) {
+		if ((job->ofname->name == NULL) ||
+		    (job->ofname->taskid != -1)) {
+			cio_fds->out.fd = STDOUT_FILENO;
+		} else {
+			cio_fds->out.fd = open(job->ofname->name,
+					       file_flags, 0644);
+			if (cio_fds->out.fd == -1) {
+				error("Could not open stdout file: %m");
+				exit(error_exit);
+			}
+		}
+		if (job->ofname->name != NULL
+		    && job->efname->name != NULL
+		    && !strcmp(job->ofname->name, job->efname->name)) {
+			err_shares_out = true;
+		}
+	}
+
+	/*
+	 * create seperate stderr file descriptor only if stderr is not sharing
+	 * the stdout file descriptor
+	 */
+	if (err_shares_out) {
+		debug3("stdout and stderr sharing a file");
+		cio_fds->err.fd = cio_fds->out.fd;
+		cio_fds->err.taskid = cio_fds->out.taskid;
+	} else if (_is_local_file(job->efname)) {
+		if ((job->efname->name == NULL) ||
+		    (job->efname->taskid != -1)) {
+			cio_fds->err.fd = STDERR_FILENO;
+		} else {
+			cio_fds->err.fd = open(job->efname->name,
+					       file_flags, 0644);
+			if (cio_fds->err.fd == -1) {
+				error("Could not open stderr file: %m");
+				exit(error_exit);
+			}
+		}
+	}
+}
+
 extern int launch_g_setup_srun_opt(char **rest)
 {
 	if (launch_init() < 0)
@@ -336,20 +437,26 @@ extern int launch_g_create_job_step(srun_job_t *job, bool use_all_cpus,
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.create_job_step))(job, use_all_cpus,
-							signal_function,
-							destroy_job);
+	return (*(ops.create_job_step))(
+		job, use_all_cpus, signal_function, destroy_job);
 }
 
 extern int launch_g_step_launch(
 	srun_job_t *job, slurm_step_io_fds_t *cio_fds,
-	uint32_t *global_rc, bool got_alloc)
+	uint32_t *global_rc)
 {
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.step_launch))(job, cio_fds, global_rc,
-						    got_alloc);
+	return (*(ops.step_launch))(job, cio_fds, global_rc);
+}
+
+extern int launch_g_step_wait(srun_job_t *job, bool got_alloc)
+{
+	if (launch_init() < 0)
+		return SLURM_ERROR;
+
+	return (*(ops.step_wait))(job, got_alloc);
 }
 
 extern int launch_g_step_terminate(void)

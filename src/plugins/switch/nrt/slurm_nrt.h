@@ -77,13 +77,14 @@ enum {
 	EUNLOAD
 };
 
+/* FIXME: Need to look at performances. Test9.9 running slow on NRT */
 #define NRT_DEBUG 1	/* Enable extra logging. 0=off, 1=on, 2=verbose */
-#define NRT_DEBUG_CNT 4	/* Count of windows, adapters, etc to log
+#define NRT_DEBUG_CNT 0	/* Count of windows, adapters, etc to log
 			 * use this to limit volume of logging */
 #define NRT_MAXADAPTERS 2
 #define NRT_LIBSTATE_LEN (1024 * 1024 * 1)
 
-extern char *nrt_adapter_name_check(char *network, hostlist_t hl);
+extern bool nrt_adapter_name_check(char *token, hostlist_t hl);
 extern int nrt_clear_node_state(void);
 extern char *nrt_err_str(int rc);
 extern int nrt_slurmctld_init(void);
@@ -98,8 +99,11 @@ extern void nrt_free_nodeinfo(slurm_nrt_nodeinfo_t *np, bool ptr_into_array);
 extern int nrt_alloc_jobinfo(slurm_nrt_jobinfo_t **jh);
 extern int nrt_build_jobinfo(slurm_nrt_jobinfo_t *jp, hostlist_t hl,
 			     uint16_t *tasks_per_node, uint32_t **tids,
-			     bool sn_all, char *adapter_name, bool bulk_xfer,
-			     bool ip_v4, bool user_space, char *protocol);
+			     bool sn_all,
+			     char *adapter_name, nrt_adapter_t dev_type,
+			     bool bulk_xfer, uint32_t bulk_xfer_resources,
+			     bool ip_v4, bool user_space, char *protocol,
+			     int instances);
 extern int nrt_pack_jobinfo(slurm_nrt_jobinfo_t *jp, Buf buf);
 extern int nrt_unpack_jobinfo(slurm_nrt_jobinfo_t *jp, Buf buf);
 extern slurm_nrt_jobinfo_t *nrt_copy_jobinfo(slurm_nrt_jobinfo_t *jp);

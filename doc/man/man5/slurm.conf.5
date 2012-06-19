@@ -733,10 +733,10 @@ The value may not exceed 65533.
 \fBLicenses\fR
 Specification of licenses (or other resources available on all
 nodes of the cluster) which can be allocated to jobs.
-License names can optionally be followed by an asterisk
+License names can optionally be followed by a colon
 and count with a default count of one.
 Multiple license names should be comma separated (e.g.
-"Licenses=foo*4,bar").
+"Licenses=foo:4,bar").
 Note that SLURM prevents jobs from being scheduled if their
 required license specification is not available.
 SLURM does not prevent jobs from using licenses that are
@@ -1171,6 +1171,12 @@ resources for use.
 While this program is running, the nodes associated with the job will be
 have a POWER_UP/CONFIGURING flag set in their state, which can be readily
 viewed.
+The slurmctld daemon will wait indefinitely for this program to complete.
+Once the program completes with an exit code of zero, the nodes will be
+considered ready for use and the program will be started.
+If some node can not be made available for use, the program should drain
+the node (typically using the scontrol command) and terminate with a non\-zero
+exit code.
 A non\-zero exit code will result in the job being requeued (where possible)
 or killed.
 See \fBProlog and Epilog Scripts\fR for more information.
@@ -2338,7 +2344,7 @@ they must exactly match the entries in the \fBNodeName\fR
 (e.g. "NodeName=lx[0\-7] NodeAddr="elx[0\-7]").
 \fBNodeAddr\fR may also contain IP addresses.
 By default, the \fBNodeAddr\fR will be identical in value to
-\fBNodeName\fR.
+\fBNodeHostname\fR.
 
 .TP
 \fBCoresPerSocket\fR

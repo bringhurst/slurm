@@ -1,4 +1,4 @@
-.TH "salloc" "1" "SLURM 2.4" "October 2011" "SLURM Commands"
+.TH "salloc" "1" "SLURM 2.5" "June 2012" "SLURM Commands"
 
 .SH "NAME"
 salloc \- Obtain a SLURM job allocation (a set of nodes), execute a command,
@@ -495,10 +495,10 @@ range of allocated nodes.
 \fB\-L\fR, \fB\-\-licenses\fR=<\fBlicense\fR>
 Specification of licenses (or other resources available on all
 nodes of the cluster) which must be allocated to this job.
-License names can be followed by an asterisk and count
+License names can be followed by a colon and count
 (the default count is one).
 Multiple license names should be comma separated (e.g.
-"\-\-licenses=foo*4,bar").
+"\-\-licenses=foo:4,bar").
 
 .TP
 \fB\-m\fR, \fB\-\-distribution\fR=
@@ -603,6 +603,10 @@ This parameter would generally be used if whole nodes
 are allocated to jobs (\fBSelectType=select/linear\fR).
 Also see \fB\-\-mem\-per\-cpu\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
+NOTE: Enforcement of memory limits currently requires enabling of
+accounting, which samples memory use on a periodic basis (data need
+not be stored, just collected). A task may exceed the memory limit 
+until the next periodic accounting sample.
 
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
@@ -734,35 +738,81 @@ This option is current supported on systems with IBM's Parallel Environment (PE)
 See IBM's LoadLeveler job command keyword documentation about the keyword
 "network" for more information.
 Multiple values may be specified in a comma separated list.
+All options are case in\-sensitive.
 Supported values include:
 .RS
 .TP 12
-\fBBULK_XFER\fR
-Enable bulk transfer of data using Remote Direct-Memory Access (RDMA)
+\fBBULK_XFER\fR [=<\fIresources\fR>]
+Enable bulk transfer of data using Remote Direct-Memory Access (RDMA).
+The optional \fIresources\fR specification is a numeric value which can have
+a suffix of "k", "K", "m", "M", "g" or "G" for kilobytes, megabytes or
+gigabytes.
+.TP
+\fBDEVTYPE\fR [=<\fItype\fR>]
+Specify the device type to use for communications.
+The supported values of \fItype\fR are:
+"IB" (InfiniBand), "HFI" (P7 Host Fabric Interface),
+"IPONLY" (IP-Only interfaces), "HPCE" (HPC Ethernet), and
+"KMUX" (Kernel Emulation of HPCE).
+.TP
+\fBINSTANCES\fR [=<\fIcount\fR>]
+Specify number of network connections for each task on each network connection.
+The default instance count is 1.
 .TP
 \fBIPV4\fR
-Use Internet Protocol (IP) version 4 communications (default)
+Use Internet Protocol (IP) version 4 communications (default).
 .TP
 \fBIPV6\fR
-Use Internet Protocol (IP) version 6 communications
+Use Internet Protocol (IP) version 6 communications.
 .TP
 \fBLAPI\fR
-Use the LAPI protocol
+Use the LAPI protocol.
+.TP
+\fBMPI\fR
+Use the MPI protocol.
+MPI is the default protocol.
 .TP
 \fBPAMI\fR
-Use the PAMI protocol
+Use the PAMI protocol.
 .TP
 \fBSN_ALL\fR
-Use all available switch networks (default)
+Use all available switch networks (default).
 .TP
 \fBSN_SINGLE\fR
-Use one available switch networks
+Use one available switch network.
+.TP
+\fBUPC\fR
+Use the UPC protocol.
 .TP
 \fBUS\fR
-Use User Space communications
+Use User Space communications.
 .TP
 Specific adapter name
-One specific adapter name may be specified (e.g. "eth0")
+One specific adapter name may be specified (e.g. "eth0" or "mlx4_0").
+.TP
+
+Some examples of network specifications:
+.TP
+\fBInstances=2,US,MPI,SN_ALL\fR
+Create two user space connections for MPI communications on every switch
+network for each task.
+.TP
+\fBUS,MPI,Instances=3,IB\fR
+Create three user space connections for MPI communications on every InfiniBand
+network for each task.
+.TP
+\fBIPV4,LAPI,SN_Single\fR
+Create a IP version 4 connection for LAPI communications on one switch network
+for each task.
+.TP
+\fBInstances=2,US,LAPI,MPI\fR
+Create two user space connections each for LAPI and MPI communcations on every
+switch network for each task. Note that SN_ALL is the default option so every
+switch network is used. Also note that Instances=2 specifies that two
+connections are established for each protocol (LAPI and MPI) and each task.
+If there are two networks and four tasks on the node then a total
+of 32 connections are estabhished (2 instances x 2 protocols x 2 networks x
+4 tasks).
 .RE
 
 .TP

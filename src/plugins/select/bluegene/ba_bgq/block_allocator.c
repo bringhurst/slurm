@@ -1553,7 +1553,8 @@ extern struct job_record *ba_remove_job_in_block_job_list(
 	if (!bg_record->job_list)
 		return NULL;
 
-	xassert((ba_mp = list_peek(bg_record->ba_mp_list)));
+	ba_mp = list_peek(bg_record->ba_mp_list);
+	xassert(ba_mp);
 
 	if (in_job_ptr && in_job_ptr->magic != JOB_MAGIC) {
 		/* This can happen if the mmcs job hangs out in the system
@@ -1717,6 +1718,10 @@ extern int ba_translate_coord2nc(uint16_t *cnode_coords)
 	return nc_loc;
 }
 
+extern ba_mp_t *ba_inx2ba_mp(int inx)
+{
+	return ba_main_grid_array[inx];
+}
 
 static char *_copy_from_main(List main_mps, List ret_list)
 {

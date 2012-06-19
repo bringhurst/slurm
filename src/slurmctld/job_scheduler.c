@@ -419,8 +419,14 @@ extern bool replace_batch_job(slurm_msg_t * msg, void *fini_job)
 	now = time(NULL);
 	min_age = now - slurmctld_conf.min_job_age;
 	lock_slurmctld(job_write_lock);
-	xassert(fini_job_ptr->job_resrcs);
-	xassert(fini_job_ptr->job_resrcs->node_bitmap);
+	if (!fini_job_ptr->job_resrcs ||
+	    !fini_job_ptr->job_resrcs->node_bitmap) {
+		/* This should never happen, but if it does, avoid using
+		 * a bad pointer below. */
+		error("job_resrcs empty for job %u", fini_job_ptr->job_id);
+		unlock_slurmctld(job_write_lock);
+		goto send_reply;
+	}
 	if (!avail_front_end()) {
 		unlock_slurmctld(job_write_lock);
 		goto send_reply;
@@ -517,10 +523,8 @@ next_part:		part_ptr = (struct part_record *)
 
 		if ((job_ptr->state_reason == WAIT_QOS_JOB_LIMIT) ||
 		    (job_ptr->state_reason == WAIT_QOS_RESOURCE_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_TIME_LIMIT)) {
+		    (job_ptr->state_reason == WAIT_QOS_TIME_LIMIT))
 			job_ptr->state_reason = WAIT_NO_REASON;
-			acct_policy_job_runnable(job_ptr);
-		}
 
 		if ((job_ptr->state_reason == WAIT_NODE_NOT_AVAIL) &&
 		    job_ptr->details && job_ptr->details->req_node_bitmap &&
@@ -761,7 +765,7 @@ extern int schedule(uint32_t job_limit)
 	while (1) {
 		if (fifo_sched) {
 			if (job_ptr && part_iterator &&
-			    IS_JOB_PENDING(job_ptr))/* started in other part */
+			    IS_JOB_PENDING(job_ptr)) /*started in other part?*/
 				goto next_part;
 			job_ptr = (struct job_record *) list_next(job_iterator);
 			if (!job_ptr)
@@ -849,12 +853,9 @@ next_part:			part_ptr = (struct part_record *)
 			}
 		}
 
-		if ((job_ptr->state_reason == WAIT_QOS_JOB_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_RESOURCE_LIMIT) ||
-		    (job_ptr->state_reason == WAIT_QOS_TIME_LIMIT)) {
-			job_ptr->state_reason = WAIT_NO_REASON;
-			acct_policy_job_runnable(job_ptr);
-		}
+		if (!acct_policy_job_runnable_state(job_ptr) &&
+		    !acct_policy_job_runnable(job_ptr))
+			continue;
 
 		if ((job_ptr->state_reason == WAIT_NODE_NOT_AVAIL) &&
 		    job_ptr->details && job_ptr->details->req_node_bitmap &&
@@ -881,7 +882,9 @@ next_part:			part_ptr = (struct part_record *)
 		}
 		i = bit_overlap(avail_node_bitmap,
 				job_ptr->part_ptr->node_bitmap);
-		if (( job_ptr->details && (i < job_ptr->details->max_nodes)) ||
+		if ((job_ptr->details &&
+		    (job_ptr->details->min_nodes != NO_VAL) &&
+		    (job_ptr->details->min_nodes >  i)) ||
 		    (!job_ptr->details && (i == 0))) {
 			/* Too many nodes DRAIN, DOWN, or
 			 * reserved for jobs in higher priority partition */

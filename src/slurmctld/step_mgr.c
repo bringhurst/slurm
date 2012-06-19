@@ -59,6 +59,7 @@
 #include "src/common/checkpoint.h"
 #include "src/common/forward.h"
 #include "src/common/gres.h"
+#include "src/common/node_select.h"
 #include "src/common/slurm_accounting_storage.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_interface.h"
@@ -173,7 +174,7 @@ static struct step_record * _create_step_record(struct job_record *job_ptr)
 	step_ptr->job_ptr = job_ptr;
 	step_ptr->start_time = time(NULL);
 	step_ptr->time_limit = INFINITE;
-	step_ptr->jobacct = jobacct_gather_g_create(NULL);
+	step_ptr->jobacct = jobacctinfo_create(NULL);
 	step_ptr->requid = -1;
 	if (list_append (job_ptr->step_list, step_ptr) == NULL)
 		fatal ("_create_step_record: unable to allocate memory");
@@ -221,7 +222,7 @@ static void _free_step_rec(struct step_record *step_ptr)
 	xfree(step_ptr->host);
 	xfree(step_ptr->name);
 	slurm_step_layout_destroy(step_ptr->step_layout);
-	jobacct_gather_g_destroy(step_ptr->jobacct);
+	jobacctinfo_destroy(step_ptr->jobacct);
 	FREE_NULL_BITMAP(step_ptr->core_bitmap_job);
 	FREE_NULL_BITMAP(step_ptr->exit_node_bitmap);
 	FREE_NULL_BITMAP(step_ptr->step_node_bitmap);
@@ -341,6 +342,7 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 {
 	struct job_record *job_ptr;
 	struct step_record *step_ptr;
+	int rc = SLURM_SUCCESS;
 
 	job_ptr = find_job_record(job_id);
 	if (job_ptr == NULL) {
@@ -348,9 +350,11 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 		return ESLURM_INVALID_JOB_ID;
 	}
 
-	if (IS_JOB_FINISHED(job_ptr))
-		return ESLURM_ALREADY_DONE;
-	if (!IS_JOB_RUNNING(job_ptr)) {
+	if (IS_JOB_FINISHED(job_ptr)) {
+		rc = ESLURM_ALREADY_DONE;
+		if (signal != SIG_NODE_FAIL)
+			return rc;
+	} else if (!IS_JOB_RUNNING(job_ptr)) {
 		verbose("job_step_signal: step %u.%u can not be sent signal "
 			"%u from state=%s", job_id, step_id, signal,
 			job_state_string(job_ptr->job_state));
@@ -370,7 +374,17 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 		return ESLURM_INVALID_JOB_ID;
 	}
 
-#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P	
+	/* If SIG_NODE_FAIL codes through it means we had nodes failed
+	   so handle that in the select plugin and switch the signal
+	   to KILL afterwards.
+	*/
+	if (signal == SIG_NODE_FAIL) {
+		select_g_fail_cnode(step_ptr);
+		signal = SIGKILL;
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	}
+#if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
 	srun_step_signal(step_ptr, signal);
 #endif
 
@@ -2685,7 +2699,7 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 		step_ptr->exit_code = req->step_rc;
 		if (max_rc)
 			*max_rc = step_ptr->exit_code;
-		jobacct_gather_g_aggregate(step_ptr->jobacct, req->jobacct);
+		jobacctinfo_aggregate(step_ptr->jobacct, req->jobacct);
 		/* we don't want to delete the step record here since
 		   right after we delete this step again if we delete
 		   it here we won't find it when we try the second
@@ -2700,7 +2714,7 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 		return EINVAL;
 	}
 
-	jobacct_gather_g_aggregate(step_ptr->jobacct, req->jobacct);
+	jobacctinfo_aggregate(step_ptr->jobacct, req->jobacct);
 
 	if (!step_ptr->exit_node_bitmap) {
 		/* initialize the node bitmap for exited nodes */

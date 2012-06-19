@@ -5,13 +5,54 @@ documents those changes that are of interest to users and admins.
 =============================
  -- Add new output to "scontrol show configuration" of LicensesUsed. Output is
     "name:used/total"
+ -- Changed jobacct_gather plugin infrastructure to be cleaner and easier to
+    maintain.
+ -- Change license option count separator from "*" to ":" for consistency with
+    the gres option (e.g. "--licenses=foo:2 --gres=gpu:2"). The "*" will still
+    be accepted, but is no longer documented.
+ -- Permit more than 100 jobs to be scheduled per node (new limit is 10,000
+    jobs).
+ -- Restructure of srun code to allow outside programs to utilize existing
+    logic.
 
 * Changes in SLURM 2.4.0.rc2
 =============================
  -- Cray - Improve support for zero compute note resource allocations.
     Partition used can now be configured with no nodes nodes.
- -- BGQ - make it so srun -i<taskid> works correctly
- -- fix parse_uint32/16 to complain if a non digit is given
+ -- BGQ - make it so srun -i<taskid> works correctly.
+ -- Fix parse_uint32/16 to complain if a non-digit is given.
+ -- Add SUBMITHOST to job state passed to Moab vial sched/wiki2. Patch by Jon
+    Bringhurst (LANL).
+ -- BGQ - Fix issue when running with AllowSubBlockAllocations=Yes without
+    compiling with --enable-debug
+ -- Modify scontrol to require "-dd" option to report batch job's script. Patch
+    from Don Albert, Bull.
+ -- Modify SchedulerParamters option to match documentation: "bf_res="
+    changed to "bf_resolution=". Patch from Rod Schultz, Bull.
+ -- Fix bug that clears job pending reason field. Patch fron Don Lipari, LLNL.
+ -- In etc/init.d/slurm move check for scontrol after sourcing
+    /etc/sysconfig/slurm. Patch from Andy Wettstein, University of Chicago.
+ -- Fix in scheduling logic that can delay jobs with min/max node counts.
+ -- BGQ - fix issue where if a step uses the entire allocation and then
+    the next step in the allocation only uses part of the allocation it gets
+    the correct cnodes.
+ -- BGQ - Fix checking for IO on a block with new IBM driver V1R1M1 previous
+    function didn't always work correctly.
+ -- BGQ - Fix issue when a nodeboard goes down and you want to combine blocks
+    to make a larger small block and are running with sub-blocks.
+ -- BLUEGENE - Better logic for making small blocks around bad nodeboard/card.
+ -- BGQ - When using an old IBM driver cnodes that go into error because of
+    a job kill timeout aren't always reported to the system.  This is now
+    handled by the runjob_mux plugin.
+ -- BGQ - Added information on how to setup the runjob_mux to run as SlurmUser.
+ -- Improve memory consumption on step layouts with high task count.
+ -- BGQ - quiter debug when the real time server comes back but there are
+    still messages we find when we poll but haven't given it back to the real
+    time yet.
+ -- BGQ - fix for if a request comes in smaller than the smallest block and
+    we must use a small block instead of a shared midplane block.
+ -- Fix issues on large jobs (>64k tasks) to have the correct counter type when
+    packing the step layout structure.
 
 * Changes in SLURM 2.4.0.rc1
 =============================
