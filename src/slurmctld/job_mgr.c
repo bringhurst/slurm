@@ -101,7 +101,8 @@
 #define JOB_HASH_INX(_job_id)	(_job_id % hash_table_size)
 
 /* Change JOB_STATE_VERSION value when changing the state save format */
-#define JOB_STATE_VERSION      "VER011"
+#define JOB_STATE_VERSION      "VER012"
+#define JOB_2_4_STATE_VERSION  "VER012"		/* SLURM version 2.4 */
 #define JOB_2_3_STATE_VERSION  "VER011"		/* SLURM version 2.3 */
 #define JOB_2_2_STATE_VERSION  "VER010"		/* SLURM version 2.2 */
 #define JOB_2_1_STATE_VERSION  "VER009"		/* SLURM version 2.1 */
@@ -623,6 +624,8 @@ extern int load_all_job_state(void)
 	if (ver_str) {
 		if (!strcmp(ver_str, JOB_STATE_VERSION)) {
 			protocol_version = SLURM_PROTOCOL_VERSION;
+		} else if (!strcmp(ver_str, JOB_2_3_STATE_VERSION)) {
+			protocol_version = SLURM_2_3_PROTOCOL_VERSION;
 		} else if (!strcmp(ver_str, JOB_2_2_STATE_VERSION)) {
 			protocol_version = SLURM_2_2_PROTOCOL_VERSION;
 		} else if (!strcmp(ver_str, JOB_2_1_STATE_VERSION)) {
@@ -639,6 +642,13 @@ extern int load_all_job_state(void)
 		return EFAULT;
 	}
 	xfree(ver_str);
+
+	/* There was a bug in 2.4.0 where the job state version wasn't
+	 * incremented correctly.  Luckly the node state was.  We will
+	 * use it to set the version correctly in the job.
+	 */
+	if (load_2_4_state && protocol_version == SLURM_2_3_PROTOCOL_VERSION)
+		protocol_version = SLURM_2_4_PROTOCOL_VERSION;
 
 	safe_unpack_time(&buf_time, buffer);
 	safe_unpack32( &saved_job_id, buffer);
@@ -2211,10 +2221,10 @@ extern int kill_job_by_part_name(char *part_name)
 					difftime(now, job_ptr->suspend_time);
 			} else
 				job_ptr->end_time = now;
+			job_completion_logger(job_ptr, false);
 			if (!pending)
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
-			job_completion_logger(job_ptr, false);
 		} else if (pending) {
 			job_count++;
 			info("Killing job_id %u on defunct partition %s",
@@ -2333,9 +2343,9 @@ extern int kill_job_by_front_end_name(char *node_name)
 				 * job looks like a new job. */
 				job_ptr->job_state  = JOB_NODE_FAIL;
 				build_cg_bitmap(job_ptr);
+				job_completion_logger(job_ptr, true);
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
-				job_completion_logger(job_ptr, true);
 				job_ptr->db_index = 0;
 				job_ptr->job_state = JOB_PENDING;
 				if (job_ptr->node_cnt)
@@ -2377,9 +2387,9 @@ extern int kill_job_by_front_end_name(char *node_name)
 							 job_ptr->suspend_time);
 				} else
 					job_ptr->end_time = now;
+				job_completion_logger(job_ptr, false);
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
-				job_completion_logger(job_ptr, false);
 			}
 		}
 	}
@@ -2566,9 +2576,9 @@ extern int kill_running_job_by_node_name(char *node_name)
 				 * job looks like a new job. */
 				job_ptr->job_state  = JOB_NODE_FAIL;
 				build_cg_bitmap(job_ptr);
+				job_completion_logger(job_ptr, true);
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
-				job_completion_logger(job_ptr, true);
 				job_ptr->db_index = 0;
 				job_ptr->job_state = JOB_PENDING;
 				if (job_ptr->node_cnt)
@@ -2610,9 +2620,9 @@ extern int kill_running_job_by_node_name(char *node_name)
 							 job_ptr->suspend_time);
 				} else
 					job_ptr->end_time = now;
+				job_completion_logger(job_ptr, false);
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
-				job_completion_logger(job_ptr, false);
 			}
 		}
 
@@ -2920,10 +2930,11 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	int error_code;
 	bool no_alloc, top_prio, test_only, too_fragmented, independent;
 	struct job_record *job_ptr;
+	time_t now = time(NULL);
+
 	error_code = _job_create(job_specs, allocate, will_run,
 				 &job_ptr, submit_uid);
 	*job_pptr = job_ptr;
-	time_t now = time(NULL);
 
 	if (error_code) {
 		if (job_ptr && (immediate || will_run)) {
@@ -3119,11 +3130,11 @@ extern int job_fail(uint32_t job_id)
 		job_ptr->exit_code = 1;
 		job_ptr->state_reason = FAIL_LAUNCH;
 		xfree(job_ptr->state_desc);
+		job_completion_logger(job_ptr, false);
 		if (job_ptr->node_bitmap) {
 			build_cg_bitmap(job_ptr);
 			deallocate_nodes(job_ptr, false, suspended, false);
 		}
-		job_completion_logger(job_ptr, false);
 		return SLURM_SUCCESS;
 	}
 	/* All other states */
@@ -3226,8 +3237,8 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 		job_ptr->job_state      = job_term_state | JOB_COMPLETING;
 		build_cg_bitmap(job_ptr);
 		jobacct_storage_g_job_suspend(acct_db_conn, job_ptr);
-		deallocate_nodes(job_ptr, false, true, preempt);
 		job_completion_logger(job_ptr, false);
+		deallocate_nodes(job_ptr, false, true, preempt);
 		verbose("job_signal %u of suspended job %u successful",
 			signal, job_id);
 		return SLURM_SUCCESS;
@@ -3241,8 +3252,8 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 			last_job_update			= now;
 			job_ptr->job_state = job_term_state | JOB_COMPLETING;
 			build_cg_bitmap(job_ptr);
-			deallocate_nodes(job_ptr, false, false, preempt);
 			job_completion_logger(job_ptr, false);
+			deallocate_nodes(job_ptr, false, false, preempt);
 		} else if (batch_flag) {
 			if (job_ptr->batch_flag)
 				_signal_batch_job(job_ptr, signal);
@@ -3819,8 +3830,6 @@ extern int job_limits_check(struct job_record **job_pptr)
 			       job_ptr->job_id);
 			fail_reason = WAIT_QOS_THRES;
 		}
-	} else if (job_ptr->priority == 0) {   /* user or administrator hold */
-		fail_reason = WAIT_HELD;
 	}
 
 	return (fail_reason);
@@ -5299,8 +5308,8 @@ static void _job_timed_out(struct job_record *job_ptr)
 		job_ptr->job_state          = JOB_TIMEOUT | JOB_COMPLETING;
 		build_cg_bitmap(job_ptr);
 		job_ptr->exit_code = MAX(job_ptr->exit_code, 1);
-		deallocate_nodes(job_ptr, true, false, false);
 		job_completion_logger(job_ptr, false);
+		deallocate_nodes(job_ptr, true, false, false);
 	} else
 		job_signal(job_ptr->job_id, SIGKILL, 0, 0, false);
 	return;
@@ -9024,9 +9033,8 @@ extern void job_completion_logger(struct job_record  *job_ptr, bool requeue)
 
 #ifdef HAVE_BG
 	/* If on a bluegene system we want to remove the job_resrcs so
-	   we don't get an error message about them already existing
-	   when the job goes to run again.
-	*/
+	 * we don't get an error message about them already existing
+	 * when the job goes to run again. */
 	if (requeue)
 		free_job_resources(&job_ptr->job_resrcs);
 #endif
@@ -9059,7 +9067,7 @@ extern void job_completion_logger(struct job_record  *job_ptr, bool requeue)
 	g_slurm_jobcomp_write(job_ptr);
 
 	/* When starting the resized job everything is taken care of
-	   there, so don't call it here. */
+	 * elsewhere, so don't call it here. */
 	if (IS_JOB_RESIZING(job_ptr))
 		return;
 
@@ -9083,7 +9091,7 @@ extern void job_completion_logger(struct job_record  *job_ptr, bool requeue)
 		}
 	}
 
-	if(!with_slurmdbd && !job_ptr->db_index)
+	if (!with_slurmdbd && !job_ptr->db_index)
 		jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 
 	jobacct_storage_g_job_complete(acct_db_conn, job_ptr);
@@ -9612,9 +9620,9 @@ extern int job_requeue (uid_t uid, uint32_t job_id, slurm_fd_t conn_fd,
 	 * job looks like a new job. */
 	job_ptr->job_state  = JOB_CANCELLED;
 	build_cg_bitmap(job_ptr);
+	job_completion_logger(job_ptr, true);
 	deallocate_nodes(job_ptr, false, suspended, preempt);
 	xfree(job_ptr->details->req_node_layout);
-	job_completion_logger(job_ptr, true);
 	job_ptr->db_index = 0;
 	job_ptr->job_state = JOB_PENDING;
 	if (job_ptr->node_cnt)

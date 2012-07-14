@@ -49,7 +49,6 @@
 
 #if HAVE_LIBNRT
 # include <nrt.h>
-# define RSCT_DEVTYPE_INFINIBAND 32
 #else
 # error "Must have libnrt to compile this module!"
 #endif
@@ -77,12 +76,12 @@ enum {
 	EUNLOAD
 };
 
-/* FIXME: Need to look at performances. Test9.9 running slow on NRT */
-#define NRT_DEBUG 1	/* Enable extra logging. 0=off, 1=on, 2=verbose */
 #define NRT_DEBUG_CNT 0	/* Count of windows, adapters, etc to log
 			 * use this to limit volume of logging */
-#define NRT_MAXADAPTERS 2
+#define NRT_MAXADAPTERS 8
 #define NRT_LIBSTATE_LEN (1024 * 1024 * 1)
+
+extern uint32_t debug_flags;
 
 extern bool nrt_adapter_name_check(char *token, hostlist_t hl);
 extern int nrt_clear_node_state(void);
@@ -103,7 +102,7 @@ extern int nrt_build_jobinfo(slurm_nrt_jobinfo_t *jp, hostlist_t hl,
 			     char *adapter_name, nrt_adapter_t dev_type,
 			     bool bulk_xfer, uint32_t bulk_xfer_resources,
 			     bool ip_v4, bool user_space, char *protocol,
-			     int instances);
+			     int instances, int cau, int immed);
 extern int nrt_pack_jobinfo(slurm_nrt_jobinfo_t *jp, Buf buf);
 extern int nrt_unpack_jobinfo(slurm_nrt_jobinfo_t *jp, Buf buf);
 extern slurm_nrt_jobinfo_t *nrt_copy_jobinfo(slurm_nrt_jobinfo_t *jp);

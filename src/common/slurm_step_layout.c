@@ -388,7 +388,7 @@ extern int slurm_step_layout_destroy(slurm_step_layout_t *step_layout)
 int slurm_step_layout_host_id (slurm_step_layout_t *s, int taskid)
 {
 	int i, j;
-	if (taskid > s->task_cnt - 1)
+	if (!s->tasks || !s->tids || (taskid > s->task_cnt - 1))
 		return SLURM_ERROR;
 	for (i=0; i < s->node_cnt; i++)
 		for (j=0; j<s->tasks[i]; j++)
@@ -632,7 +632,7 @@ static int _task_layout_cyclic(slurm_step_layout_t *step_layout,
 			   && (taskid<step_layout->task_cnt)); i++) {
 			if ((j<cpus[i]) || over_subscribe) {
 				xrealloc(step_layout->tids[i], sizeof(uint32_t)
-					 * step_layout->tasks[i]+1);
+					 * (step_layout->tasks[i] + 1));
 
 				step_layout->tids[i][step_layout->tasks[i]] =
 					taskid;

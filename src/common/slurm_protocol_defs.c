@@ -118,7 +118,7 @@ extern void slurm_msg_t_init(slurm_msg_t *msg)
  *	values from the "src" slurm_msg_t structure.
  * IN src - Pointer to the initialized message from which "dest" will
  *	be initialized.
- * OUT dest - Pointer to the slurm_msg_t which will be intialized.
+ * OUT dest - Pointer to the slurm_msg_t which will be initialized.
  * NOTE: the "dest" structure will contain pointers into the contents of "src".
  */
 extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src)
@@ -504,7 +504,7 @@ extern void slurm_free_node_registration_status_msg(
 		xfree(msg->node_name);
 		xfree(msg->os);
 		xfree(msg->step_id);
-		if (msg->startup)
+		if (msg->switch_nodeinfo)
 			switch_g_free_node_info(&msg->switch_nodeinfo);
 		xfree(msg);
 	}
@@ -1391,6 +1391,16 @@ extern char *reservation_flags_string(uint16_t flags)
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "NO_STATIC");
+	}
+	if (flags & RESERVE_FLAG_PART_NODES) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "PART_NODES");
+	}
+	if (flags & RESERVE_FLAG_NO_PART_NODES) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "NO_PART_NODES");
 	}
 	return flag_str;
 }

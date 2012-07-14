@@ -116,6 +116,7 @@ const char *node_select_syms[] = {
 static slurm_select_ops_t ops;
 static plugin_context_t *g_context = NULL;
 static pthread_mutex_t	g_context_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool init_run = false;
 
 /*
  * Initialize context for node selection plugin
@@ -126,7 +127,7 @@ extern int other_select_init(void)
 	char *plugin_type = "select";
 	char *type = NULL;
 
-	if (g_context)
+	if (init_run && g_context)
 		return retval;
 
 	slurm_mutex_lock(&g_context_lock);
@@ -156,6 +157,7 @@ extern int other_select_init(void)
 		retval = SLURM_ERROR;
 		goto done;
 	}
+	init_run = true;
 
 done:
 	slurm_mutex_unlock(&g_context_lock);
@@ -167,6 +169,7 @@ extern int other_select_fini(void)
 	int rc = SLURM_SUCCESS;
 
 	slurm_mutex_lock(&g_context_lock);
+	init_run = false;
 	if (!g_context)
 		goto fini;
 
@@ -738,12 +741,14 @@ extern int other_reconfigure (void)
  * IN node_cnt - count of required nodes
  * RET - nodes selected for use by the reservation
  */
-extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
+extern bitstr_t * other_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt,
+				  uint32_t core_cnt, bitstr_t **core_bitmap)
 {
 	if (other_select_init() < 0)
 		return NULL;
 
-	return (*(ops.resv_test))(avail_bitmap, node_cnt);
+	return (*(ops.resv_test))(avail_bitmap, node_cnt, core_cnt,
+				  core_bitmap);
 }
 
 extern void other_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)

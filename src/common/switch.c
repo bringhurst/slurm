@@ -115,6 +115,7 @@ typedef struct slurm_switch_ops {
 	int          (*slurmctld_init)    ( void );
 	int          (*slurmd_init)       ( void );
 	int          (*slurmd_step_init)  ( void );
+	int          (*reconfig)          ( void );
 } slurm_switch_ops_t;
 
 /*
@@ -156,12 +157,14 @@ static const char *syms[] = {
 	"switch_p_libstate_clear",
 	"switch_p_slurmctld_init",
 	"switch_p_slurmd_init",
-	"switch_p_slurmd_step_init"
+	"switch_p_slurmd_step_init",
+	"switch_p_reconfig"
 };
 
 static slurm_switch_ops_t ops;
 static plugin_context_t *g_context = NULL;
 static pthread_mutex_t      context_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool init_run = false;
 
 extern int switch_init( void )
 {
@@ -169,7 +172,7 @@ extern int switch_init( void )
 	char *plugin_type = "switch";
 	char *type = NULL;
 
-	if ( g_context )
+	if ( init_run && g_context )
 		return retval;
 
 	slurm_mutex_lock( &context_lock );
@@ -186,6 +189,7 @@ extern int switch_init( void )
 		retval = SLURM_ERROR;
 		goto done;
 	}
+	init_run = true;
 
 done:
 	slurm_mutex_unlock( &context_lock );
@@ -200,8 +204,17 @@ extern int switch_fini(void)
 	if (!g_context)
 		return SLURM_SUCCESS;
 
+	init_run = false;
 	rc = plugin_context_destroy(g_context);
 	return rc;
+}
+
+extern int  switch_g_reconfig(void)
+{
+	if ( switch_init() < 0 )
+		return SLURM_ERROR;
+
+	return (*(ops.reconfig))( );
 }
 
 extern int  switch_save(char *dir_name)

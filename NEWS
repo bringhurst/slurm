@@ -1,6 +1,23 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.5.0.pre2
+=============================
+ -- When running with multiple slurmd daemons per node, enable specifying a
+    range of ports on a single line of the node configuration in slurm.conf.
+ -- Add reservation flag of Part_Nodes to allocate all nodes in a partition to
+    a reservation and automatically change the reservation when nodes are
+    added to or removed from the reservation. Based upon work by
+    Bill Brophy, Bull.
+ -- Add support for advanced reservation for specific cores rather than whole
+    nodes. Current limiations: homogeneous cluster, nodes idle when reservation
+    created, and no more than one reservation per node. Code is still under
+    development. Work by Alejandro Lucero Palau, et. al, BSC.
+ -- Add DebugFlag of Switch to log switch plugin details.
+ -- Correct job node_cnt value in job completion plugin when job fails due to
+    down node. Previously was too low by one.
+
+
 * Changes in SLURM 2.5.0.pre1
 =============================
  -- Add new output to "scontrol show configuration" of LicensesUsed. Output is
@@ -15,8 +32,40 @@ documents those changes that are of interest to users and admins.
  -- Restructure of srun code to allow outside programs to utilize existing
     logic.
 
-* Changes in SLURM 2.4.0.rc2
-=============================
+* Changes in SLURM 2.4.2
+========================
+ -- BLUEGENE - Correct potential deadlock issue when hardware goes bad and
+    there are jobs running on that hardware.
+ -- If job is submitted to more than one partition, it's partition pointer can
+    be set to an invalid value. This can result in the count of CPUs allocated
+    on a node being bad, resulting in over- or under-allocation of its CPUs.
+    Patch by Carles Fenoy, BSC.
+ -- Fix bug in task layout with select/cons_res plugin and --ntasks-per-node
+    option. Patch by Martin Perry, Bull.
+ -- BLUEGENE - remove race condition where if a block is removed while waiting
+    for a job to finish on it the number of unused cpus wasn't updated
+    correctly.
+ -- BGQ - make sure we have a valid block when creating or finishing a step
+    allocation.
+ -- BLUEGENE - If a large block (> 1 midplane) is in error and underlying
+    hardware is marked bad remove the larger block and create a block over
+    just the bad hardware making the other hardware available to run on.
+ -- BLUEGENE - Handle job completion correctly if an admin removes a block
+    where other blocks on an overlapping midplane are running jobs.
+ -- BLUEGENE - correctly remove running jobs when freeing a block.
+ -- BGQ - correct logic to place multiple (< 1 midplane) steps inside a
+    multi midplane block allocation.
+ -- BGQ - Make it possible for a multi midplane allocation to run on more
+    than 1 midplane but not the entire allocation.
+
+* Changes in SLURM 2.4.1
+========================
+ -- Fix bug for job state change from 2.3 -> 2.4 job state can now be preserved
+    correctly when transitioning.  This also applies for 2.4.0 -> 2.4.1, no
+    state will be lost. (Thanks to Carles Fenoy)
+
+* Changes in SLURM 2.4.0
+========================
  -- Cray - Improve support for zero compute note resource allocations.
     Partition used can now be configured with no nodes nodes.
  -- BGQ - make it so srun -i<taskid> works correctly.
@@ -53,6 +102,25 @@ documents those changes that are of interest to users and admins.
     we must use a small block instead of a shared midplane block.
  -- Fix issues on large jobs (>64k tasks) to have the correct counter type when
     packing the step layout structure.
+ -- BGQ - fix issue where if a user was asking for tasks and ntasks-per-node
+    but not node count the node count is correctly figured out.
+ -- Move logic to always use the 1st alphanumeric node as the batch host for
+    batch jobs.
+ -- BLUEGENE - fix race condition where if a nodeboard/card goes down at the
+    same time a block is destroyed and that block just happens to be the
+    smallest overlapping block over the bad hardware.
+ -- Fix bug when querying accounting looking for a job node size.
+ -- BLUEGENE - fix possible race condition if cleaning up a block and the
+    removal of the job on the block failed.
+ -- BLUEGENE - fix issue if a cable was in an error state make it so we can
+    check if a block is still makable if the cable wasn't in error.
+ -- Put nodes names in alphabetic order in node table.
+ -- If preempted job should have a grace time and preempt mode is not cancel
+    but job is going to be canceled because it is interactive or other reason
+    it now receives the grace time.
+ -- BGQ - Modified documents to explain new plugin_flags needed in bg.properties
+    in order for the runjob_mux to run correctly.
+ -- BGQ - change linking from libslurm.o to libslurmhelper.la to avoid warning.
 
 * Changes in SLURM 2.4.0.rc1
 =============================

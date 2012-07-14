@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "April 2012" "slurm.conf 2.4" "Slurm configuration file"
+.TH "slurm.conf" "5" "July 2012" "slurm.conf 2.5" "Slurm configuration file"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -323,6 +323,9 @@ Resource selection plugin
 .TP
 \fBSteps\fR
 Slurmctld resource allocation for job steps
+.TP
+\fBSwitch\fR
+Siwtch plugin
 .TP
 \fBTriggers\fR
 Slurmctld triggers
@@ -836,7 +839,7 @@ Currently supported versions include:
 \fBmvapich\fR,
 \fBnone\fR (default, which works for many other versions of MPI) and
 \fBopenmpi\fR.
-\fpmi2\fR,
+\fBpmi2\fR,
 More information about MPI use is available here
 <http://www.schedmd.com/slurmdocs/mpi_guide.html>.
 
@@ -2381,7 +2384,8 @@ colon with a numeric value (default value is one)
 (e.g. "Gres=bandwidth:10000,gpu:2").
 A suffix of "K", "M" or "G" may be used to mulitply the number by 1024,
 1048576 or 1073741824 respectively (e.g. "Gres=bandwidth:4G,gpu:4")..
-By default a node has no generic resources.
+By default a node has no generic resources and its maximum count is
+4,294,967,295.
 Also see \fBFeature\fR.
 
 .TP
@@ -2390,7 +2394,8 @@ The port number that the SLURM compute node daemon, \fBslurmd\fR, listens
 to for work on this particular node. By default there is a single port number
 for all \fBslurmd\fR daemons on all compute nodes as defined by the 
 \fBSlurmdPort\fR configuration parameter. Use of this option is not generally
-recommended except for development or testing purposes.
+recommended except for development or testing purposes. If multiple
+\fBslurmd\fR daemons execute on a node this can specify a range of ports
 
 .TP
 \fBProcs\fR

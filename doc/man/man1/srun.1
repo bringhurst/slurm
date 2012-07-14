@@ -625,8 +625,13 @@ Inside the hostfile must contain at minimum the number of hosts
 requested and be one per line or comma separated.  If specifying a
 task count (\fB\-n\fR, \fB\-\-ntasks\fR=<\fInumber\fR>), your tasks
 will be laid out on the nodes in the order of the file.
-.TP
+.br
+\fBNOTE:\fR The arbitrary distribution option on a job allocation only
+controls the nodes to be allocated to the job and not the allocation of
+CPUs on those nodes. This option is meant primarily to control a job step's
+task layout in an existing job allocation for the srun command.
 
+.TP
 Second distribution method:
 .TP
 .B block
@@ -844,20 +849,33 @@ All options are case in\-sensitive.
 Supported values include:
 .RS
 .TP 12
-\fBBULK_XFER\fR [=<\fIresources\fR>]
+\fBBULK_XFER\fR[=<\fIresources\fR>]
 Enable bulk transfer of data using Remote Direct-Memory Access (RDMA).
 The optional \fIresources\fR specification is a numeric value which can have
 a suffix of "k", "K", "m", "M", "g" or "G" for kilobytes, megabytes or
 gigabytes.
 .TP
-\fBDEVTYPE\fR [=<\fItype\fR>]
+\fBCAU\fR=<\fIcount\fR>
+Number of Collecitve Accelleration Units (CAU) required.
+Applies only to IBM Power7 processors.
+Default value is zero.
+.TP
+\fBDEVNAME\fR=<\fIname\fR>
+Specify the device name to use for communications (e.g. "eth0" or "mlx4_0").
+.TP
+\fBDEVTYPE\fR=<\fItype\fR>
 Specify the device type to use for communications.
 The supported values of \fItype\fR are:
 "IB" (InfiniBand), "HFI" (P7 Host Fabric Interface),
 "IPONLY" (IP-Only interfaces), "HPCE" (HPC Ethernet), and
 "KMUX" (Kernel Emulation of HPCE).
 .TP
-\fBINSTANCES\fR [=<\fIcount\fR>]
+\fBIMMED\fR=<\fIcount\fR>
+Number of immediate send slots per window required.
+Applies only to IBM Power7 processors.
+Default value is zero.
+.TP
+\fBINSTANCES\fR=<\fIcount\fR>
 Specify number of network connections for each task on each network connection.
 The default instance count is 1.
 .TP
@@ -889,9 +907,6 @@ Use the UPC protocol.
 \fBUS\fR
 Use User Space communications.
 .TP
-Specific adapter name
-One specific adapter name may be specified (e.g. "eth0" or "mlx4_0").
-.TP
 
 Some examples of network specifications:
 .TP
@@ -899,7 +914,7 @@ Some examples of network specifications:
 Create two user space connections for MPI communications on every switch
 network for each task.
 .TP
-\fBUS,MPI,Instances=3,IB\fR
+\fBUS,MPI,Instances=3,Devtype=IB\fR
 Create three user space connections for MPI communications on every InfiniBand
 network for each task.
 .TP
@@ -1190,8 +1205,8 @@ requested time limit for a job exceeds the partition's time limit,
 the job will be left in a PENDING state (possibly indefinitely).
 If the requested time limit for a job step exceeds the partition's
 time limit, the job step will not be initiated.  The default time
-limit is the partition's time limit.  When the time limit is reached,
-the job's tasks are sent SIGTERM followed by SIGKILL. If the time
+limit is the partition's default time limit.  When the time limit is reached,
+each task in each job step is sent SIGTERM followed by SIGKILL.  The
 limit is for the job, all job steps are signaled. If the time limit is
 for a single job step within an existing job allocation, only that job
 step will be affected. A job time limit supercedes all job step time

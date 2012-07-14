@@ -34,6 +34,7 @@ generated_html = \
 	job_launch.html \
 	job_submit_plugins.html \
 	jobcompplugins.html \
+	launch_plugins.html \
 	mail.html \
 	man_index.html \
 	maui.html \
@@ -45,6 +46,7 @@ generated_html = \
 	multi_cluster.html \
 	news.html \
 	overview.html \
+	poe.html \
 	platforms.html \
 	plugins.html \
 	power_save.html \
