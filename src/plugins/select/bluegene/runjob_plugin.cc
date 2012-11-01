@@ -138,7 +138,8 @@ Plugin::Plugin() :
 
 	runjob_list = list_create(_destroy_runjob_job);
 
-	std::cout << "Slurm runjob plugin loaded" << std::endl;
+	std::cout << "Slurm runjob plugin loaded version "
+		  << SLURM_VERSION_STRING << std::endl;
 }
 
 Plugin::~Plugin()
@@ -265,7 +266,8 @@ void Plugin::execute(bgsched::runjob::Verify& verify)
 			+ " block="
 			+ boost::lexical_cast<std::string>(block_cnode_cnt);
 		goto deny_job;
-	} else if (step_cnode_cnt < block_cnode_cnt) {
+	} else if ((step_cnode_cnt < block_cnode_cnt)
+		   && (step_cnode_cnt <= 512)) {
 		uint16_t dim;
 		uint16_t tmp_uint16[HIGHEST_DIMENSIONS];
 
@@ -374,8 +376,24 @@ deny_job:
 void Plugin::execute(const bgsched::runjob::Started& data)
 {
 	boost::lock_guard<boost::mutex> lock( _mutex );
-	// std::cout << "runjob " << data.pid()
-	// 	  << " started with ID " << data.job() << std::endl;
+	// ListIterator itr = NULL;
+	// runjob_job_t *runjob_job = NULL;
+
+	// slurm_mutex_lock(&runjob_list_lock);
+	// if (runjob_list) {
+	// 	itr = list_iterator_create(runjob_list);
+	// 	while ((runjob_job = (runjob_job_t *)list_next(itr))) {
+	// 		if (runjob_job->pid == data.pid()) {
+	// 			std::cout << "Slurm step " << runjob_job->job_id
+	// 				  << "." << runjob_job->step_id
+	// 				  << " is IBM ID " << data.job()
+	// 				  << std::endl;
+	// 			break;
+	// 		}
+	// 	}
+	// 	list_iterator_destroy(itr);
+	// }
+	// slurm_mutex_unlock(&runjob_list_lock);
 }
 
 void Plugin::execute(const bgsched::runjob::Terminated& data)
@@ -385,9 +403,6 @@ void Plugin::execute(const bgsched::runjob::Terminated& data)
 	uint16_t sig = 0;
 
 	boost::lock_guard<boost::mutex> lock( _mutex );
-	// std::cout << "runjob " << data.pid() << " shadowing job "
-	// 	  << data.job() << " finished with status "
-	// 	  << data.status() << std::endl;
 
 	// output failed nodes
 	const bgsched::runjob::Terminated::Nodes& nodes =
@@ -398,6 +413,11 @@ void Plugin::execute(const bgsched::runjob::Terminated& data)
 		itr = list_iterator_create(runjob_list);
 		while ((runjob_job = (runjob_job_t *)list_next(itr))) {
 			if (runjob_job->pid == data.pid()) {
+				// std::cout << "Slurm step " << runjob_job->job_id
+				// 	  << "." << runjob_job->step_id
+				// 	  << ", IBM ID " << data.job()
+				// 	  << " finished with status "
+				// 	  << data.status() << std::endl;
 				list_remove(itr);
 				break;
 			}
@@ -408,8 +428,9 @@ void Plugin::execute(const bgsched::runjob::Terminated& data)
 
 	if (!runjob_job) {
 		if (runjob_list)
-			std::cerr << "Couldn't find job running with pid "
-				  << data.pid() << std::endl;
+			std::cerr << "Couldn't find job running with pid, "
+				  << data.pid() << " ID " << data.job()
+				  << std::endl;
 	} else if (data.kill_timeout()) {
 		std::cerr << runjob_job->job_id << "." << runjob_job->step_id
 			  << " had a kill_timeout()" << std::endl;

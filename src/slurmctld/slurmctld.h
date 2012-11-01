@@ -330,6 +330,7 @@ typedef struct slurmctld_resv {
 	char *accounts;		/* names of accounts permitted to use	*/
 	int account_cnt;	/* count of accounts permitted to use	*/
 	char **account_list;	/* list of accounts permitted to use	*/
+	bool account_not;	/* account_list users NOT permitted to use */
 	char *assoc_list;	/* list of associations			*/
 	uint32_t cpu_cnt;	/* number of reserved CPUs		*/
 	bitstr_t *core_bitmap;	/* bitmap of reserved cores		*/
@@ -338,6 +339,7 @@ typedef struct slurmctld_resv {
 	time_t end_time;	/* end time of reservation		*/
 	char *features;		/* required node features		*/
 	uint16_t flags;		/* see RESERVE_FLAG_* in slurm.h	*/
+	bool full_nodes;	/* when reservation uses full nodes or not */
 	uint32_t job_pend_cnt;	/* number of pending jobs		*/
 	uint32_t job_run_cnt;	/* number of running jobs		*/
 	List license_list;	/* structure with license info		*/
@@ -359,6 +361,7 @@ typedef struct slurmctld_resv {
 	char *users;		/* names of users permitted to use	*/
 	int user_cnt;		/* count of users permitted to use	*/
 	uid_t *user_list;	/* array of users permitted to use	*/
+	bool user_not;		/* user_list users NOT permitted to use	*/
 } slurmctld_resv_t;
 
 /*****************************************************************************\
@@ -502,8 +505,14 @@ struct job_record {
 					 * wait call) */
 	front_end_record_t *front_end_ptr; /* Pointer to front-end node running
 					 * this job */
-	char *gres;			/* generic resources */
+	char *gres;			/* generic resources requested by job*/
 	List gres_list;			/* generic resource allocation detail */
+	char *gres_alloc;		/* Allocated GRES added over all nodes
+					 * to be passed to slurmdbd */
+	char *gres_req;			/* Requested GRES added over all nodes
+					 * to be passed to slurmdbd */
+	char *gres_used;		/* Actual GRES use added over all nodes
+					 * to be passed to slurmdbd */
 	uint32_t group_id;		/* group submitted under */
 	uint32_t job_id;		/* job ID */
 	struct job_record *job_next;	/* next entry with same hash index */
@@ -633,6 +642,7 @@ struct 	step_record {
 					 * step relative to job's nodes,
 					 * see src/common/job_resources.h */
 	uint32_t cpu_count;		/* count of step's CPUs */
+	uint32_t cpu_freq;	        /* requested cpu frequency */
 	uint16_t cpus_per_task;		/* cpus per task initiated */
 	uint16_t cyclic_alloc;		/* set for cyclic task allocation
 					 * across nodes */
@@ -1565,8 +1575,12 @@ extern void reset_first_job_id(void);
  */
 extern void reset_job_bitmaps (void);
 
-/* Reset all scheduling statistics */
-extern void reset_stats(void);
+/* Reset a node's CPU load value */
+extern void reset_node_load(char *node_name, uint32_t cpu_load);
+
+/* Reset all scheduling statistics
+ * level IN - clear backfilled_jobs count if set */
+extern void reset_stats(int level);
 
 /*
  * restore_node_features - Make node and config (from slurm.conf) fields

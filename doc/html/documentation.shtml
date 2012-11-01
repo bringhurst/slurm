@@ -2,7 +2,8 @@
 
 <h1> Documentation</h1>
 
-Also see <a href="publications.html">Publications and Presentations</a>.
+Also see <a href="tutorials.html">Tutorials</a> and
+<a href="publications.html">Publications and Presentations</a>.
 
 <h2>SLURM Users</h2>
 <ul>
@@ -19,7 +20,7 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <li><a href="bluegene.html">Blue Gene User and Administrator Guide</a></li>
 <li><a href="cray.html">Cray User and Administrator Guide</a></li>
 <li><a href="ibm.html">IBM AIX User and Administrator Guide</a></li>
-<li><a href="poe.html">IBM Parallel Environment User and Administrator Guide</a></li>
+<li><a href="ibm-pe.html">IBM Parallel Environment User and Administrator Guide</a></li>
 </ul>
 </ul>
 
@@ -33,6 +34,7 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <li><a href="cpu_management.html">CPU Management User and Administrator Guide</a></li>
 <li><a href="big_sys.html">Large Cluster Administration Guide</a></li>
 <li><a href="power_save.html">Power Saving Guide</a></li>
+<li><a href="prolog_epilog.html">Prolog and Epilog Guide</a></li>
 <li><a href="troubleshoot.html">Troubleshooting Guide</a></li>
 <li>SLURM Scheduling</li>
 <ul>
@@ -42,6 +44,7 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <li><a href="gres.html">Generic Resource (GRES) Scheduling</a></li>
 <li><a href="high_throughput.html">High Throughput Computing Guide</a></li>
 <li><a href="priority_multifactor.html">Multifactor Job Priority</a></li>
+<li><a href="priority_multifactor2.html">Multifactor2 Job Priority (Ticket Based)</a></li>
 <li><a href="preempt.html">Preemption</a></li>
 <li><a href="qos.html">Quality of Service (QOS)</a></li>
 <li><a href="resource_limits.html">Resource Limits</a></li>
@@ -60,7 +63,7 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 <li><a href="bluegene.html">Blue Gene User and Administrator Guide</a></li>
 <li><a href="cray.html">Cray User and Administrator Guide</a></li>
 <li><a href="ibm.html">IBM AIX User and Administrator Guide</a></li>
-<li><a href="poe.html">IBM Parallel Environment User and Administrator Guide</a></li>
+<li><a href="ibm-pe.html">IBM Parallel Environment User and Administrator Guide</a></li>
 <li><a href="sun_const.html">Sun Constellation Aministrator Guide</a></li>
 </ul>
 </ul>
@@ -99,6 +102,6 @@ Also see <a href="publications.html">Publications and Presentations</a>.
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 6 July 2012</p>
+<p style="text-align:center;">Last modified 17 October 2012</p>
 
 <!--#include virtual="footer.txt"-->

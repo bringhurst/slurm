@@ -62,6 +62,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/assoc_mgr.h"
+#include "src/common/gres.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/node_select.h"
@@ -123,6 +124,156 @@ static bool _valid_feature_counts(struct job_details *detail_ptr,
 static bitstr_t *_valid_features(struct job_details *detail_ptr,
 				 struct config_record *config_ptr);
 
+static int _fill_in_gres_fields(struct job_record *job_ptr);
+
+/*
+ * _build_gres_alloc_string - Fill in the gres_alloc string field for a
+ *      given job_record
+ *	also claim required licenses and resources reserved by accounting
+ *	policy association
+ * IN job_ptr - the job record whose "gres_alloc" field is to be constructed
+ * IN valtype - The type of count associated which each allocated GRES type
+ *              to retreive and record in the string.
+ * RET Error number.  Currently not used (always set to 0).
+ */
+
+static int _build_gres_alloc_string(struct job_record *job_ptr, int valtype)
+{
+	char                buf[128], *prefix="";
+	List                gres_list;
+	bitstr_t *	    node_bitmap = job_ptr->node_bitmap;
+	struct node_record* node_ptr;
+	int                 *gres_count_ids, *gres_count_vals;
+	int                 *gres_count_ids_loc = NULL;
+	int                 *gres_count_vals_loc = NULL;
+	int                 i, ix, jx, kx, i_first, i_last, rv = 0;
+	int                 count    = 0;
+	int                 gres_type_count = 4; /* Guess number GRES types */
+	int                 oldcount = 0;
+
+	xstrcat(job_ptr->gres_alloc, "");
+	if (node_bitmap) {
+		i_first = bit_ffs(node_bitmap);
+		i_last  = bit_fls(node_bitmap);
+	} else {
+		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+			debug("(%s:%d) job id: %u -- No nodes in bitmap of "
+			      "job_record!",
+			      THIS_FILE, __LINE__, job_ptr->job_id);
+		return rv;
+	}
+	if (i_first == -1)      /* job has no nodes */
+		i_last = -2;
+
+	gres_count_ids  = xmalloc(sizeof(int) * gres_type_count);
+	gres_count_vals = xmalloc(sizeof(int) * gres_type_count);
+
+	/* Loop through each node allocated to the job tallying all GRES
+	 * types found.*/
+	for (ix = i_first; ix <= i_last; ix++) {
+		if (!bit_test(node_bitmap, ix))
+			continue;
+
+		node_ptr  = node_record_table_ptr + ix;
+		gres_list = node_ptr->gres_list;
+		if (gres_list)
+			count = list_count(gres_list);
+		else
+			count = 0;
+
+		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+			debug("(%s:%d) job id: %u -- Count of "
+			      "GRES types in the gres_list is: %d",
+			      THIS_FILE, __LINE__, job_ptr->job_id, count);
+
+		/* Only reallocate when there is an increase in size of the
+		 * local arrays. */
+		if (count > oldcount) {
+			if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+				debug("(%s:%d) job id: %u -- Old GRES "
+				      "count: %d New GRES count: %d",
+				      THIS_FILE, __LINE__, job_ptr->job_id,
+				      oldcount, count);
+
+			/* Allocate arrays to hold each GRES type and its
+			 * associated value found on this node.
+			 */
+			oldcount = count;
+			i = count * sizeof(int);
+			xrealloc(gres_count_ids_loc,  i);
+			xrealloc(gres_count_vals_loc, i);
+		}
+
+		if (gres_list) {
+			gres_num_gres_alloced_all(gres_list, count,
+						  gres_count_ids_loc,
+						  gres_count_vals_loc,
+						  valtype);
+		}
+
+		/* Combine the local results into the master count results */
+		for (jx = 0; jx < count; jx++) {
+			int found = 0;
+
+			/* Find matching GRES type. */
+			for (kx = 0; kx < gres_type_count; kx++) {
+				if (!gres_count_ids[kx])
+					break;
+
+				if (gres_count_ids_loc[jx] !=
+				    gres_count_ids[kx])
+					continue;
+
+				/* If slot is found, update current value.*/
+				gres_count_vals[kx] += gres_count_vals_loc[jx];
+				found = 1;
+				break;
+			}
+
+			/* If the local GRES type doesn't already appear in the
+			 * list then add it. */
+			if (!found) {
+				/* If necessary, expand the array of GRES types
+				 * being reported. */
+				if (kx >= gres_type_count) {
+					gres_type_count *= 2;
+					i = gres_type_count * sizeof(int);
+					xrealloc(gres_count_ids,  i);
+					xrealloc(gres_count_vals, i);
+				}
+				gres_count_ids[kx]   = gres_count_ids_loc[jx];
+				gres_count_vals[kx] += gres_count_vals_loc[jx];
+			}
+	 	}
+	}
+	xfree(gres_count_ids_loc);
+	xfree(gres_count_vals_loc);
+
+	/* Append value to the gres string. */
+	for (jx = 0; jx < gres_type_count; jx++) {
+		char gres_name[64];
+
+		if (!gres_count_ids[jx])
+			break;
+
+		/* Map the GRES type id back to a GRES type name. */
+		gres_gresid_to_gresname(gres_count_ids[jx], gres_name,
+					sizeof(gres_name));
+
+		sprintf(buf,"%s%s:%d", prefix, gres_name, gres_count_vals[jx]);
+		xstrcat(job_ptr->gres_alloc, buf);
+		if (prefix[0] == '\0')
+			prefix = ",";
+
+		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+			debug("(%s:%d) job id: %u -- gres_alloc substring=(%s)",
+			      THIS_FILE, __LINE__, job_ptr->job_id, buf);
+	}
+	xfree(gres_count_ids);
+	xfree(gres_count_vals);
+
+	return rv;
+}
 
 /*
  * allocate_nodes - change state of specified nodes to NODE_STATE_ALLOCATED
@@ -770,7 +921,9 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	bool tried_sched = false;	/* Tried to schedule with avail nodes */
 	static uint32_t cr_enabled = NO_VAL;
 	bool preempt_flag = false;
+	bool nodes_busy = false;
 	int shared = 0, select_mode;
+	List preemptee_cand;
 
 	if (test_only)
 		select_mode = SELECT_MODE_TEST_ONLY;
@@ -923,6 +1076,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				fatal("bit_copy malloc failure");
 		}
 		for (i = 0; i < node_set_size; i++) {
+			int count1 = 0, count2 = 0;
 			if (!has_xand &&
 			    !bit_test(node_set_ptr[i].feature_bits, j))
 				continue;
@@ -938,6 +1092,10 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			}
 
 			bit_and(node_set_ptr[i].my_bitmap, avail_node_bitmap);
+			if (!nodes_busy) {
+				count1 = bit_set_count(node_set_ptr[i].
+						       my_bitmap);
+			}
 			if (!preempt_flag) {
 				if (shared) {
 					bit_and(node_set_ptr[i].my_bitmap,
@@ -960,6 +1118,12 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 					cg_node_bitmap);
 				bit_not(cg_node_bitmap);
 #endif
+			}
+			if (!nodes_busy) {
+				count2 = bit_set_count(node_set_ptr[i].
+						       my_bitmap);
+				if (count1 != count2)
+					nodes_busy = true;
 			}
 			if (avail_bitmap) {
 				bit_or(avail_bitmap,
@@ -996,13 +1160,20 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			}
 			if (job_ptr->details->req_node_bitmap == NULL)
 				bit_and(avail_bitmap, avail_node_bitmap);
+			/* Only preempt jobs when all possible nodes are being
+			 * considered for use, otherwise we would preempt jobs
+			 * to use the lowest weight nodes. */
+			if ((i+1) < node_set_size)
+				preemptee_cand = NULL;
+			else
+				preemptee_cand = preemptee_candidates;
 			pick_code = select_g_job_test(job_ptr,
 						      avail_bitmap,
 						      min_nodes,
 						      max_nodes,
 						      req_nodes,
 						      select_mode,
-						      preemptee_candidates,
+						      preemptee_cand,
 						      preemptee_job_list,
 						      exc_core_bitmap);
 #if 0
@@ -1122,12 +1293,12 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 
 	/* The job is not able to start right now, return a
 	 * value indicating when the job can start */
-	if (!runable_avail)
-		error_code = ESLURM_NODE_NOT_AVAIL;
 	if (!runable_ever) {
 		error_code = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
 		info("_pick_best_nodes: job %u never runnable",
 		     job_ptr->job_id);
+	} else if (!runable_avail && !nodes_busy) {
+		error_code = ESLURM_NODE_NOT_AVAIL;
 	}
 
 	if (error_code == SLURM_SUCCESS) {
@@ -1457,7 +1628,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 	}
 	select_bitmap = NULL;	/* nothing left to free */
 	allocate_nodes(job_ptr);
-	build_node_details(job_ptr);
+	build_node_details(job_ptr, true);
 
 	/* This could be set in the select plugin so we want to keep
 	   the flag. */
@@ -1502,7 +1673,118 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only,
 		}
 		xfree(node_set_ptr);
 	}
+
+	/* Update the job_record's gres and gres_alloc fields with
+	 * strings representing the amount of each GRES type requested
+	 *  and allocated. */
+	_fill_in_gres_fields(job_ptr);
+	if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+		debug("(%s:%d) job id: %u -- job_record->gres: (%s), "
+		      "job_record->gres_alloc: (%s)",
+		      THIS_FILE, __LINE__, job_ptr->job_id,
+		      job_ptr->gres, job_ptr->gres_alloc);
+
 	return error_code;
+}
+
+/*
+ * Update a job_record's gres (required GRES)
+ * and gres_alloc (allocated GRES) fields according
+ * to the information found in the job_record and its
+ * substructures.
+ * IN job_ptr - A job's job_record.
+ * RET an integer representing any potential errors--
+ *     currently not used.
+ */
+
+static int _fill_in_gres_fields(struct job_record *job_ptr)
+{
+	char buf[128];
+	char *   tok, *   last = NULL, *prefix = "";
+	char *subtok, *sublast = NULL;
+	char *req_config  = job_ptr->gres;
+	char *tmp_str;
+	uint32_t ngres_req;
+	int      valtype, rv = 0;
+
+	/* First build the GRES requested field. */
+	if ((req_config == NULL) || (req_config[0] == '\0')) {
+		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES)
+			debug("(%s:%d) job id: %u -- job_record->gres "
+			      "is empty or NULL; this is OK if no GRES "
+			      "was requested",
+			      THIS_FILE, __LINE__, job_ptr->job_id);
+
+		xfree(job_ptr->gres_req);
+		xstrcat(job_ptr->gres_req, "");
+	} else if ( job_ptr->node_cnt > 0 ) {
+		/* job_ptr->gres_req is rebuilt/replaced here */
+		tmp_str = xstrdup(req_config);
+		xfree(job_ptr->gres_req);
+		job_ptr->gres_req = xstrdup("");
+
+		tok = strtok_r(tmp_str, ",", &last);
+		while (tok) {
+			/* Tokenize tok so that we discard the colon and
+			 * everything after it. Then use gres_get_value_by_type
+			 * to find the associated count.
+			 */
+			subtok = strtok_r(tok, ":", &sublast);
+
+			/* Retrieve the number of GRES requested/required. */
+			ngres_req = gres_get_value_by_type(job_ptr->gres_list,
+							   subtok);
+
+			/* In the event that we somehow have a valid
+			 * GRES type but don't find a quantity for it,
+			 * we simply write ":0" for the quantity.
+			 */
+			if (ngres_req == NO_VAL)
+				ngres_req = 0;
+
+			/* Append value to the gres string. */
+			snprintf(buf, sizeof(buf), "%s%s:%u",
+				 prefix, subtok,
+				 ngres_req * job_ptr->node_cnt);
+
+			xstrcat(job_ptr->gres_req, buf);
+
+			if (prefix[0] == '\0')
+				prefix = ",";
+			if (slurm_get_debug_flags() & DEBUG_FLAG_GRES) {
+				debug("(%s:%d) job id:%u -- ngres_req:"
+				      "%u, gres_req substring = (%s)",
+				      THIS_FILE, __LINE__,
+				      job_ptr->job_id, ngres_req, buf);
+			}
+
+			tok = strtok_r(NULL, ",", &last);
+		}
+		xfree(tmp_str);
+	}
+
+	if ( !job_ptr->gres_alloc || (job_ptr->gres_alloc[0] == '\0') ) {
+		char *select_type = slurm_get_select_type();
+
+		/* Find out which select type plugin we have so we can decide
+		 * what value to look for. */
+		if (!strcmp(select_type, "select/cray"))
+			valtype = GRES_VAL_TYPE_CONFIG;
+		else
+			valtype = GRES_VAL_TYPE_ALLOC;
+		xfree(select_type);
+
+		/* Now build the GRES allocated field. */
+		rv = _build_gres_alloc_string(job_ptr, valtype);
+		if (slurm_get_debug_flags() & DEBUG_FLAG_GRES) {
+			debug("(%s:%d) job id: %u -- job_record->gres: (%s), "
+			      "job_record->gres_alloc: (%s)",
+			      THIS_FILE, __LINE__, job_ptr->job_id,
+			      job_ptr->gres, job_ptr->gres_alloc);
+		}
+	}
+
+	return rv;
 }
 
 /*
@@ -2054,8 +2336,9 @@ static int _nodes_in_sets(bitstr_t *req_bitmap,
 /*
  * build_node_details - sets addresses for allocated nodes
  * IN job_ptr - pointer to a job record
+ * IN new_alloc - set if new job allocation, cleared if state recovery
  */
-extern void build_node_details(struct job_record *job_ptr)
+extern void build_node_details(struct job_record *job_ptr, bool new_alloc)
 {
 	hostlist_t host_list = NULL;
 	struct node_record *node_ptr;
@@ -2076,11 +2359,23 @@ extern void build_node_details(struct job_record *job_ptr)
 	xrealloc(job_ptr->node_addr,
 		 (sizeof(slurm_addr_t) * job_ptr->node_cnt));
 
-	xfree(job_ptr->batch_host);
 #ifdef HAVE_FRONT_END
-	job_ptr->front_end_ptr = assign_front_end();
-	xassert(job_ptr->front_end_ptr);
-	job_ptr->batch_host = xstrdup(job_ptr->front_end_ptr->name);
+	if (new_alloc) {
+		/* Find available front-end node and assign it to this job */
+		xfree(job_ptr->batch_host);
+		job_ptr->front_end_ptr = assign_front_end(NULL);
+		if (job_ptr->front_end_ptr) {
+			job_ptr->batch_host = xstrdup(job_ptr->
+						      front_end_ptr->name);
+		}
+	} else if (job_ptr->batch_host) {
+		/* Reset pointer to this job's front-end node */
+		job_ptr->front_end_ptr = assign_front_end(job_ptr->batch_host);
+		if (!job_ptr->front_end_ptr)
+			xfree(job_ptr->batch_host);
+	}
+#else
+	xfree(job_ptr->batch_host);
 #endif
 	while ((this_node_name = hostlist_shift(host_list))) {
 		if ((node_ptr = find_node_record(this_node_name))) {

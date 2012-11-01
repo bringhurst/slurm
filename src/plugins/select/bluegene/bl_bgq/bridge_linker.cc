@@ -271,6 +271,25 @@ static int _block_wait_for_jobs(char *bg_block_id, struct job_record *job_ptr)
 		return SLURM_ERROR;
 	}
 
+	/* This code can be used to simulate having a job hang in the
+	 * database.
+	 */
+	// if (job_ptr && (job_ptr->magic == JOB_MAGIC)) {
+	// 	uint32_t job_id = job_ptr->job_id;
+	// 	while (1) {
+	// 		debug("waiting on slurm job %u to "
+	// 		      "finish on block %s",
+	// 		      job_id, bg_block_id);
+	// 		sleep(3);
+	// 		if (job_ptr->magic != JOB_MAGIC) {
+	// 			info("bad magic");
+	// 			break;
+	// 		} else if (IS_JOB_COMPLETED(job_ptr)) {
+	// 			info("job completed");
+	// 			break;
+	// 		}
+	// 	}
+	// }
 #ifdef HAVE_BG_FILES
 
 	job_filter.setComputeBlockName(bg_block_id);
@@ -367,8 +386,17 @@ static void _remove_jobs_on_block_and_reset(char *block_id,
 	}
 
 	slurm_mutex_unlock(&block_state_mutex);
-	if (job_ptr)
+	if (job_ptr) {
+		if (job_ptr->magic == JOB_MAGIC) {
+			/* This signals the job purger that the job
+			   actually finished in the system.
+			*/
+			select_jobinfo_t *jobinfo = (select_jobinfo_t *)
+				job_ptr->select_jobinfo->data;
+			jobinfo->bg_record = NULL;
+		}
 		unlock_slurmctld(job_read_lock);
+	}
 
 	/* avoid locking issues just do this afterwards. */
 	if (mp_str) {
@@ -1192,6 +1220,50 @@ extern void bridge_block_post_job(char *bg_block_id,
 				  struct job_record *job_ptr)
 {
 	_remove_jobs_on_block_and_reset(bg_block_id, job_ptr);
+}
+
+
+extern uint16_t bridge_block_get_action(char *bg_block_id)
+{
+	uint16_t action = BG_BLOCK_ACTION_NONE;
+
+#if defined HAVE_BG_FILES && defined HAVE_BG_GET_ACTION
+	BlockFilter filter;
+	Block::Ptrs vec;
+
+	/* This block hasn't been created yet. */
+	if (!bg_block_id)
+		return action;
+
+	filter.setName(string(bg_block_id));
+
+	vec = bridge_get_blocks(filter);
+	if (vec.empty()) {
+		error("bridge_block_get_action: "
+		      "block %s not found, this should never happen",
+		      bg_block_id);
+		/* block is gone? */
+		return BG_BLOCK_ACTION_NAV;
+	}
+
+	const Block::Ptr &block_ptr = *(vec.begin());
+	action = bridge_translate_action(block_ptr->getAction().toValue());
+#endif
+	return action;
+}
+
+extern int bridge_check_nodeboards(char *mp_loc)
+{
+#ifdef HAVE_BG_FILES
+	NodeBoard::ConstPtrs vec = bridge_get_nodeboards(mp_loc);
+
+	BOOST_FOREACH(const NodeBoard::ConstPtr &nb_ptr, vec) {
+		if (!nb_ptr->isMetaState()
+		    && (nb_ptr->getState() != Hardware::Available))
+			return 1;
+	}
+#endif
+	return 0;
 }
 
 extern int bridge_set_log_params(char *api_file_name, unsigned int level)

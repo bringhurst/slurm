@@ -49,6 +49,7 @@
 #include <signal.h>
 #include <time.h>
 
+#include "src/common/cpu_frequency.h"
 #include "src/common/fd.h"
 #include "src/common/eio.h"
 #include "src/common/parse_time.h"
@@ -84,8 +85,7 @@ static int _handle_notify_job(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_suspend(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_resume(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_terminate(int fd, slurmd_job_t *job, uid_t uid);
-static int _handle_completion(int fd, slurmd_job_t *job, uid_t uid,
-			      int protocol);
+static int _handle_completion(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_stat_jobacct(int fd, slurmd_job_t *job, uid_t uid);
 static int _handle_task_info(int fd, slurmd_job_t *job);
 static int _handle_list_pids(int fd, slurmd_job_t *job);
@@ -517,13 +517,9 @@ _handle_request(int fd, slurmd_job_t *job, uid_t uid, gid_t gid)
 		debug("Handling REQUEST_STEP_TERMINATE");
 		rc = _handle_terminate(fd, job, uid);
 		break;
-	case REQUEST_STEP_COMPLETION:
-		debug("Handling REQUEST_STEP_COMPLETION");
-		rc = _handle_completion(fd, job, uid, 1);
-		break;
 	case REQUEST_STEP_COMPLETION_V2:
 		debug("Handling REQUEST_STEP_COMPLETION_V2");
-		rc = _handle_completion(fd, job, uid, 2);
+		rc = _handle_completion(fd, job, uid);
 		break;
 	case REQUEST_STEP_TASK_INFO:
 		debug("Handling REQUEST_STEP_TASK_INFO");
@@ -1153,12 +1149,11 @@ rwfail:
 static int
 _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 {
+	static int launch_poe = -1;
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
 
-	debug("_handle_suspend for job %u.%u",
-	      job->jobid, job->stepid);
-
+	debug("_handle_suspend for job %u.%u", job->jobid, job->stepid);
 	debug3("  uid = %d", uid);
 	if (!_slurm_authorized_user(uid)) {
 		debug("job step suspend request from uid %ld for job %u.%u ",
@@ -1177,6 +1172,14 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 	}
 
 	jobacct_gather_suspend_poll();
+	if (launch_poe == -1) {
+		char *launch_type = slurm_get_launch_type();
+		if (!strcmp(launch_type, "launch/poe"))
+			launch_poe = 1;
+		else
+			launch_poe = 0;
+		xfree(launch_type);
+	}
 
 	/*
 	 * Signal the container
@@ -1197,11 +1200,15 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 		 * (that depends upon the MPI implementaiton used), but will
 		 * also permit longer time periods when more than one job can
 		 * be running on each resource (not good). */
-		if (slurm_container_signal(job->cont_id, SIGTSTP) < 0) {
-			verbose("Error suspending %u.%u (SIGTSTP): %m",
-				job->jobid, job->stepid);
-		} else
-			sleep(2);
+		if (launch_poe == 0) {
+			/* IBM MPI seens to periodically hang upon receipt
+			 * of SIGTSTP. */
+			if (slurm_container_signal(job->cont_id, SIGTSTP) < 0) {
+				verbose("Error suspending %u.%u (SIGTSTP): %m",
+					job->jobid, job->stepid);
+			} else
+				sleep(2);
+		}
 
 		if (slurm_container_signal(job->cont_id, SIGSTOP) < 0) {
 			verbose("Error suspending %u.%u (SIGSTOP): %m",
@@ -1211,6 +1218,10 @@ _handle_suspend(int fd, slurmd_job_t *job, uid_t uid)
 		}
 		suspended = true;
 	}
+	/* reset the cpu frequencies if cpu_freq option used */
+	if (job->cpu_freq != NO_VAL)
+		cpu_freq_reset(job);
+
 	pthread_mutex_unlock(&suspend_mutex);
 
 done:
@@ -1267,6 +1278,10 @@ _handle_resume(int fd, slurmd_job_t *job, uid_t uid)
 		}
 		suspended = false;
 	}
+	/* set the cpu frequencies if cpu_freq option used */
+	if (job->cpu_freq != NO_VAL)
+		cpu_freq_set(job);
+
 	pthread_mutex_unlock(&suspend_mutex);
 
 done:
@@ -1279,7 +1294,7 @@ rwfail:
 }
 
 static int
-_handle_completion(int fd, slurmd_job_t *job, uid_t uid, int protocol)
+_handle_completion(int fd, slurmd_job_t *job, uid_t uid)
 {
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
@@ -1308,32 +1323,27 @@ _handle_completion(int fd, slurmd_job_t *job, uid_t uid, int protocol)
 		return SLURM_SUCCESS;
 	}
 
-	if (protocol >= 2)
-		safe_read(fd, &version, sizeof(int));
+	safe_read(fd, &version, sizeof(int));
 	safe_read(fd, &first, sizeof(int));
 	safe_read(fd, &last, sizeof(int));
 	safe_read(fd, &step_rc, sizeof(int));
-	if (protocol >= 2) {
-		/*
-		 * We must not use getinfo over a pipe with slurmd here 
-		 * Indeed, slurmstepd does a large use of setinfo over a pipe
-		 * with slurmd and doing the reverse can result in a deadlock
-		 * scenario with slurmd : 
-		 * slurmd(lockforread,write)/slurmstepd(write,lockforread)
-		 * Do pack/unpack instead to be sure of independances of 
-		 * slurmd and slurmstepd
-		 */
-		safe_read(fd, &len, sizeof(int));
-		buf = xmalloc(len);
-		safe_read(fd, buf, len);
-		buffer = create_buf(buf, len);
-		jobacctinfo_unpack(&jobacct, SLURM_PROTOCOL_VERSION,
-					buffer);
-		free_buf(buffer);
-	} else {
-		jobacct = jobacctinfo_create(NULL);
-		jobacctinfo_getinfo(jobacct, JOBACCT_DATA_PIPE, &fd);
-	}
+
+	/*
+	 * We must not use getinfo over a pipe with slurmd here
+	 * Indeed, slurmstepd does a large use of setinfo over a pipe
+	 * with slurmd and doing the reverse can result in a deadlock
+	 * scenario with slurmd :
+	 * slurmd(lockforread,write)/slurmstepd(write,lockforread)
+	 * Do pack/unpack instead to be sure of independances of
+	 * slurmd and slurmstepd
+	 */
+	safe_read(fd, &len, sizeof(int));
+	buf = xmalloc(len);
+	safe_read(fd, buf, len);
+	buffer = create_buf(buf, len);
+	jobacctinfo_unpack(&jobacct, SLURM_PROTOCOL_VERSION,
+			   PROTOCOL_TYPE_SLURM, buffer);
+	free_buf(buffer);
 
 	/*
 	 * Record the completed nodes

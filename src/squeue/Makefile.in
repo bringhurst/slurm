@@ -191,6 +191,7 @@ MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
 MKDIR_P = @MKDIR_P@
 MUNGE_CPPFLAGS = @MUNGE_CPPFLAGS@
+MUNGE_DIR = @MUNGE_DIR@
 MUNGE_LDFLAGS = @MUNGE_LDFLAGS@
 MUNGE_LIBS = @MUNGE_LIBS@
 MYSQL_CFLAGS = @MYSQL_CFLAGS@
@@ -323,7 +324,9 @@ INCLUDES = -I$(top_srcdir)
 squeue_LDADD = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
 noinst_HEADERS = squeue.h print.h
 squeue_SOURCES = squeue.c print.c opts.c sort.c
-squeue_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+squeue_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) \
+	$(HWLOC_LDFLAGS) $(HWLOC_LIBS)
+
 all: all-am
 
 .SUFFIXES:

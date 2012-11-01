@@ -117,6 +117,13 @@ typedef struct {
 					    block */
 	int start_req;                 /* state there was a start
 					  request */
+	bool full_check;               /* This request is to check all
+					* nodes and wires no matter
+					* what.  Primarily added to
+					* handle when a nodeboard
+					* goes down to avoid using
+					* the midplane for
+					* passthrough. */
 } select_ba_request_t;
 
 /*
@@ -139,7 +146,8 @@ typedef struct slurm_select_ops {
 						 uint32_t req_nodes,
 						 uint16_t mode,
 						 List preeemptee_candidates,
-						 List *preemptee_job_list);
+						 List *preemptee_job_list,
+						 bitstr_t *exc_core_bitmap);
 	int		(*job_begin)		(struct job_record *job_ptr);
 	int		(*job_ready)		(struct job_record *job_ptr);
 	bool		(*job_expand_allow)	(void);

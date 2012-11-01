@@ -1183,7 +1183,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'e':
 			xfree(opt.efname);
-			if (strncasecmp(optarg, "none", (size_t)4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
@@ -1212,7 +1212,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'i':
 			xfree(opt.ifname);
-			if (strncasecmp(optarg, "none", (size_t)4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ifname = xstrdup("/dev/null");
 			else
 				opt.ifname = xstrdup(optarg);
@@ -1271,7 +1271,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'o':
 			xfree(opt.ofname);
-			if (strncasecmp(optarg, "none", (size_t)4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
 			else
 				opt.ofname = xstrdup(optarg);
@@ -1515,7 +1515,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case LONG_OPT_NTASKSPERNODE:
 			opt.ntasks_per_node = _get_int(optarg,
-				"ntasks-per-node");
+						       "ntasks-per-node");
 			setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
 				opt.ntasks_per_node);
 			break;
@@ -1748,7 +1748,7 @@ static void _set_pbs_options(int argc, char **argv)
 			break;
 		case 'e':
 			xfree(opt.efname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
 			else
 				opt.efname = xstrdup(optarg);
@@ -1782,7 +1782,7 @@ static void _set_pbs_options(int argc, char **argv)
 			break;
 		case 'o':
 			xfree(opt.ofname);
-			if (strncasecmp(optarg, "none", (size_t) 4) == 0)
+			if (strcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
 			else
 				opt.ofname = xstrdup(optarg);
@@ -2147,7 +2147,8 @@ static bool _opt_verify(void)
 	_fullpath(&opt.ifname, opt.cwd);
 	_fullpath(&opt.ofname, opt.cwd);
 
-	if ((opt.ntasks_per_node > 0) && (!opt.ntasks_set)) {
+	if ((opt.ntasks_per_node > 0) && (!opt.ntasks_set) &&
+	    (opt.max_nodes == 0)) {
 		opt.ntasks = opt.min_nodes * opt.ntasks_per_node;
 		opt.ntasks_set = 1;
 	}

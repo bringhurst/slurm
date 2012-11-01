@@ -241,6 +241,7 @@ MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
 MKDIR_P = @MKDIR_P@
 MUNGE_CPPFLAGS = @MUNGE_CPPFLAGS@
+MUNGE_DIR = @MUNGE_DIR@
 MUNGE_LDFLAGS = @MUNGE_LDFLAGS@
 MUNGE_LIBS = @MUNGE_LIBS@
 MYSQL_CFLAGS = @MYSQL_CFLAGS@
@@ -491,7 +492,7 @@ libslurm_la_LIBADD = $(convenience_libs)
 libslurm_la_LDFLAGS = \
         $(LIB_LDFLAGS) \
         -version-info $(current):$(rev):$(age) \
-        $(OTHER_FLAGS)
+        $(OTHER_FLAGS) $(HWLOC_LDFLAGS) $(HWLOC_LIBS)
 
 
 #

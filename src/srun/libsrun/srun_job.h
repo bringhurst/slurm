@@ -88,6 +88,7 @@ typedef struct fname {
 } fname_t;
 
 typedef struct srun_job {
+	int fir_nodeid;
 	uint32_t jobid;		/* assigned job id 	                  */
 	uint32_t stepid;	/* assigned step id 	                  */
 
@@ -100,7 +101,7 @@ typedef struct srun_job {
 
 	int  rc;                /* srun return code                       */
 
-	char *alias_list;	/* node name/address/hostnamne aliases */
+	char *alias_list;	/* node name/address/hostname aliases */
 	char *nodelist;		/* nodelist in string form */
 
 	fname_t *ifname;
@@ -133,14 +134,15 @@ extern srun_job_t * job_create_allocation(
 
 extern void init_srun(int ac, char **av,
 		      log_options_t *logopt, int debug_level,
-		      bool slurm_started);
+		      bool handle_signals);
 
 extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
-			    bool slurm_started);
-extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started);
+			    bool slurm_started, bool handle_signals);
+extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started,
+				bool handle_signals);
 
 extern void fini_srun(srun_job_t *job, bool got_alloc, uint32_t *global_rc,
-		      pthread_t signal_thread, bool slurm_started);
+		      bool slurm_started);
 
 /*
  *  Update job filenames and modes for stderr, stdout, and stdin.

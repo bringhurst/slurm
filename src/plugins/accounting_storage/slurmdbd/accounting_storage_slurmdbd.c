@@ -199,6 +199,9 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->wckey         = xstrdup(job_ptr->wckey);
 	req->uid           = job_ptr->user_id;
 	req->qos_id        = job_ptr->qos_id;
+	req->gres_alloc    = job_ptr->gres_alloc;
+	req->gres_req      = job_ptr->gres_req;
+	req->gres_used     = job_ptr->gres_used;
 
 	return SLURM_SUCCESS;
 }
@@ -1294,7 +1297,7 @@ extern int acct_storage_p_remove_reservation(void *db_conn,
 	rc = slurm_send_slurmdbd_recv_rc_msg(SLURMDBD_VERSION,
 					     &req, &resp_code);
 
-	if (resp_code != SLURM_SUCCESS)
+	if ((rc == SLURM_SUCCESS) && (resp_code != SLURM_SUCCESS))
 		rc = resp_code;
 
 	return rc;

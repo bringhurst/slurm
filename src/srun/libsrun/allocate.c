@@ -106,6 +106,10 @@ static void _set_pending_job_id(uint32_t job_id)
 
 static void _signal_while_allocating(int signo)
 {
+	debug("Got signal %d", signo);
+	if (signo == SIGCONT)
+		return;
+
 	destroy_job = 1;
 	if (pending_job_id != 0) {
 		slurm_complete_job(pending_job_id, NO_VAL);
@@ -376,7 +380,7 @@ allocate_test(void)
 }
 
 resource_allocation_response_msg_t *
-allocate_nodes(void)
+allocate_nodes(bool handle_signals)
 {
 	resource_allocation_response_msg_t *resp = NULL;
 	job_desc_msg_t *j = job_desc_msg_create_from_opts();
@@ -407,9 +411,11 @@ allocate_nodes(void)
 
 	/* NOTE: Do not process signals in separate pthread. The signal will
 	 * cause slurm_allocate_resources_blocking() to exit immediately. */
-	xsignal_unblock(sig_array);
-	for (i = 0; sig_array[i]; i++)
-		xsignal(sig_array[i], _signal_while_allocating);
+	if (handle_signals) {
+		xsignal_unblock(sig_array);
+		for (i = 0; sig_array[i]; i++)
+			xsignal(sig_array[i], _signal_while_allocating);
+	}
 
 	while (!resp) {
 		resp = slurm_allocate_resources_blocking(j, opt.immediate,
@@ -446,7 +452,8 @@ allocate_nodes(void)
 		goto relinquish;
 	}
 
-	xsignal_block(sig_array);
+	if (handle_signals)
+		xsignal_block(sig_array);
 
 	job_desc_msg_destroy(j);
 

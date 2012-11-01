@@ -191,6 +191,7 @@ MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
 MKDIR_P = @MKDIR_P@
 MUNGE_CPPFLAGS = @MUNGE_CPPFLAGS@
+MUNGE_DIR = @MUNGE_DIR@
 MUNGE_LDFLAGS = @MUNGE_LDFLAGS@
 MUNGE_LIBS = @MUNGE_LIBS@
 MYSQL_CFLAGS = @MYSQL_CFLAGS@
@@ -320,7 +321,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 AM_CPPFLAGS = -DLIBSLURM_SO=\"$(libdir)/libslurm.so\"
-INCLUDES = -I$(top_srcdir)
+INCLUDES = -I$(top_srcdir) $(HWLOC_CPPFLAGS)
 slurmd_LDADD = \
 	$(top_builddir)/src/common/libdaemonize.la \
 	$(top_builddir)/src/api/libslurm.o $(DL_LIBS)	   \
@@ -336,11 +337,15 @@ SLURMD_SOURCES = \
 	xcpu.c xcpu.h
 
 slurmd_SOURCES = $(SLURMD_SOURCES)
-@HAVE_AIX_FALSE@slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+@HAVE_AIX_FALSE@slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) \
+@HAVE_AIX_FALSE@	$(HWLOC_LDFLAGS) $(HWLOC_LIBS)
+
 
 # We need to set maxdata back to 0 because this effects the "max memory size"
 # ulimit, and the ulimit is inherited by child processes.
-@HAVE_AIX_TRUE@slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) -Wl,-bmaxdata:0x0
+@HAVE_AIX_TRUE@slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) \
+@HAVE_AIX_TRUE@	$(HWLOC_LDFLAGS) $(HWLOC_LIBS) -Wl,-bmaxdata:0x0
+
 all: all-am
 
 .SUFFIXES:

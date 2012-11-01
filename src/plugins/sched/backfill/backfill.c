@@ -315,7 +315,7 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		job_ptr->details->shared = 0;
 		tmp_bitmap = bit_copy(*avail_bitmap);
 
-		if (exc_core_bitmap){
+		if (exc_core_bitmap) {
 			bit_fmt(str, (sizeof(str) - 1), exc_core_bitmap);
 			debug2(" _try_sched with exclude core bitmap: %s",str);
 		}
@@ -521,7 +521,7 @@ static int _attempt_backfill(void)
 	uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t *avail_bitmap = NULL, *resv_bitmap = NULL;
 	bitstr_t *exc_core_bitmap = NULL;
-	time_t now, sched_start, later_start, start_res;
+	time_t now, sched_start, later_start, start_res, resv_end;
 	node_space_map_t *node_space;
 	struct timeval bf_time1, bf_time2;
 	static int sched_timeout = 0;
@@ -529,6 +529,7 @@ static int _attempt_backfill(void)
 	int job_test_count = 0;
 	uint32_t *uid = NULL, nuser = 0;
 	uint16_t *njobs = NULL;
+	bool already_counted;
 
 #ifdef HAVE_CRAY
 	/*
@@ -610,6 +611,7 @@ static int _attempt_backfill(void)
 			info("backfill test for job %u", job_ptr->job_id);
 
 		slurmctld_diag_stats.bf_last_depth++;
+		already_counted = false;
 
 		if (max_backfill_job_per_user) {
 			for (j = 0; j < nuser; j++) {
@@ -712,7 +714,7 @@ static int _attempt_backfill(void)
 			end_time = (time_limit * 60) + start_res;
 		else
 			end_time = (time_limit * 60) + now;
-
+		resv_end = find_resv_end(start_res);
 		/* Identify usable nodes for this job */
 		bit_and(avail_bitmap, part_ptr->node_bitmap);
 		bit_and(avail_bitmap, up_node_bitmap);
@@ -729,6 +731,10 @@ static int _attempt_backfill(void)
 				break;
 			if ((j = node_space[j].next) == 0)
 				break;
+		}
+		if ((resv_end++) &&
+		    ((later_start == 0) || (resv_end < later_start))) {
+			later_start = resv_end;
 		}
 
 		if (job_ptr->details->exc_node_bitmap) {
@@ -789,9 +795,14 @@ static int _attempt_backfill(void)
 		debug2("backfill: entering _try_sched for job %u.",
 		       job_ptr->job_id);
 
-		slurmctld_diag_stats.bf_last_depth_try++;
+		if (!already_counted) {
+			slurmctld_diag_stats.bf_last_depth_try++;
+			already_counted = true;
+		}
+
 		j = _try_sched(job_ptr, &avail_bitmap, min_nodes, max_nodes,
 			       req_nodes, exc_core_bitmap);
+
 		now = time(NULL);
 		if (j != SLURM_SUCCESS) {
 			job_ptr->time_limit = orig_time_limit;

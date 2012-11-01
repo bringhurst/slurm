@@ -298,7 +298,7 @@ extern int trigger_clear(uid_t uid, trigger_info_msg_t *msg)
 			rc = ESLURM_INVALID_JOB_ID;
 			goto fini;
 		}
-	} else if ((trig_in->trig_id == 0) && (trig_in->user_id == 0)) {
+	} else if ((trig_in->trig_id == 0) && (trig_in->user_id == NO_VAL)) {
 		rc = EINVAL;
 		goto fini;
 	}
@@ -306,18 +306,20 @@ extern int trigger_clear(uid_t uid, trigger_info_msg_t *msg)
 	/* now look for a valid request, matching uid */
 	trig_iter = list_iterator_create(trigger_list);
 	while ((trig_test = list_next(trig_iter))) {
-		if ((trig_test->user_id != (uint32_t) uid) && (uid != 0))
-			continue;
 		if (trig_in->trig_id &&
 		    (trig_in->trig_id != trig_test->trig_id))
 			continue;
 		if (job_id && (job_id != trig_test->job_id))
 			continue;
-		if (trig_in->user_id &&
+		if ((trig_in->user_id != NO_VAL) &&
 		    (trig_in->user_id != trig_test->user_id))
 			continue;
 		if (trig_test->state == 2)	/* wait for proc termination */
 			continue;
+		if ((trig_test->user_id != (uint32_t) uid) && (uid != 0)) {
+			rc = ESLURM_ACCESS_DENIED;
+			continue;
+		}
 		list_delete_item(trig_iter);
 		rc = SLURM_SUCCESS;
 	}
@@ -696,7 +698,7 @@ static int _load_trigger_state(Buf buffer, uint16_t protocol_version)
 		safe_unpack32   (&trig_ptr->group_id,  buffer);
 		safe_unpackstr_xmalloc(&trig_ptr->program, &str_len, buffer);
 		safe_unpack8    (&trig_ptr->state,     buffer);
-	} else if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
+	} else if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		/* restore trigger pull state flags */
 		safe_unpack8(&ctld_failure, buffer);
 		safe_unpack8(&bu_ctld_failure, buffer);
@@ -716,20 +718,9 @@ static int _load_trigger_state(Buf buffer, uint16_t protocol_version)
 		safe_unpackstr_xmalloc(&trig_ptr->program, &str_len, buffer);
 		safe_unpack8    (&trig_ptr->state,     buffer);
 	} else {
-		uint16_t uint16_tmp;
-		safe_unpack32   (&trig_ptr->trig_id,   buffer);
-		safe_unpack16   (&trig_ptr->res_type,  buffer);
-		safe_unpackstr_xmalloc(&trig_ptr->res_id, &str_len, buffer);
-		/* rebuild nodes_bitmap as needed from res_id */
-		/* rebuild job_id as needed from res_id */
-		/* rebuild job_ptr as needed from res_id */
-		safe_unpack16   (&uint16_tmp,          buffer);
-		trig_ptr->trig_type = (uint32_t) uint16_tmp;
-		safe_unpack_time(&trig_ptr->trig_time, buffer);
-		safe_unpack32   (&trig_ptr->user_id,   buffer);
-		safe_unpack32   (&trig_ptr->group_id,  buffer);
-		safe_unpackstr_xmalloc(&trig_ptr->program, &str_len, buffer);
-		safe_unpack8    (&trig_ptr->state,     buffer);
+		error("_load_trigger_state: protocol_version "
+		      "%hu not supported", protocol_version);
+		goto unpack_error;
 	}
 
 	if ((trig_ptr->res_type < TRIGGER_RES_TYPE_JOB)  ||
@@ -940,10 +931,6 @@ extern int trigger_state_restore(void)
 	if (ver_str) {
 		if (!strcmp(ver_str, TRIGGER_STATE_VERSION)) {
 			protocol_version = SLURM_PROTOCOL_VERSION;
-		} else if (!strcmp(ver_str, TRIGGER_2_2_STATE_VERSION)) {
-			protocol_version = SLURM_2_2_PROTOCOL_VERSION;
-		} else if (!strcmp(ver_str, TRIGGER_2_1_STATE_VERSION)) {
-			protocol_version = SLURM_2_1_PROTOCOL_VERSION;
 		}
 	}
 

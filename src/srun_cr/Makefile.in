@@ -187,6 +187,7 @@ MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
 MKDIR_P = @MKDIR_P@
 MUNGE_CPPFLAGS = @MUNGE_CPPFLAGS@
+MUNGE_DIR = @MUNGE_DIR@
 MUNGE_LDFLAGS = @MUNGE_LDFLAGS@
 MUNGE_LIBS = @MUNGE_LIBS@
 MYSQL_CFLAGS = @MYSQL_CFLAGS@
@@ -320,7 +321,9 @@ INCLUDES = -I$(top_srcdir) $(BLCR_CPPFLAGS)
 srun_cr_SOURCES = srun_cr.c
 convenience_libs = $(top_builddir)/src/api/libslurm.o $(DL_LIBS)
 srun_cr_LDADD = $(convenience_libs) $(BLCR_LIBS)
-srun_cr_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(BLCR_LDFLAGS)
+srun_cr_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(BLCR_LDFLAGS) \
+	$(HWLOC_LDFLAGS) $(HWLOC_LIBS)
+
 all: all-am
 
 .SUFFIXES:

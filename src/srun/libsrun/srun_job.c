@@ -45,6 +45,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -164,7 +165,8 @@ job_create_noalloc(void)
 	 */
 	job = _job_create_structure(ai);
 
-	job_update_io_fnames(job);
+	if (job != NULL)
+		job_update_io_fnames(job);
 
 error:
 	xfree(ai);
@@ -405,12 +407,14 @@ job_create_allocation(resource_allocation_response_msg_t *resp)
 
 extern void init_srun(int ac, char **av,
 		      log_options_t *logopt, int debug_level,
-		      bool slurm_started)
+		      bool handle_signals)
 {
 	/* This must happen before we spawn any threads
 	 * which are not designed to handle them */
-	if (xsignal_block(sig_array) < 0)
-		error("Unable to block signals");
+	if (handle_signals) {
+		if (xsignal_block(sig_array) < 0)
+			error("Unable to block signals");
+	}
 
 	/* Initialize plugin stack, read options from plugins, etc.
 	 */
@@ -463,7 +467,7 @@ extern void init_srun(int ac, char **av,
 }
 
 extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
-			    bool slurm_started)
+			    bool slurm_started, bool handle_signals)
 {
 	resource_allocation_response_msg_t *resp;
 	srun_job_t *job = NULL;
@@ -482,6 +486,10 @@ extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
 	} else if (opt.no_alloc) {
 		info("do not allocate resources");
 		job = job_create_noalloc();
+		if (job == NULL) {
+			error("Job creation failure.");
+			exit(error_exit);
+		}
 		if (create_job_step(job, false) < 0) {
 			exit(error_exit);
 		}
@@ -540,7 +548,7 @@ extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
 		else if (!opt.job_name_set_env && opt.argc)
 			setenvfs("SLURM_JOB_NAME=%s", opt.argv[0]);
 
-		if ( !(resp = allocate_nodes()) )
+		if ( !(resp = allocate_nodes(handle_signals)) )
 			exit(error_exit);
 		*got_alloc = true;
 		_print_job_information(resp);
@@ -590,10 +598,12 @@ extern void create_srun_job(srun_job_t **p_job, bool *got_alloc,
 	*p_job = job;
 }
 
-extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started)
+extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started,
+				bool handle_signals)
 {
 	pthread_attr_t thread_attr;
-	if (!signal_thread) {
+
+	if (handle_signals && !signal_thread) {
 		slurm_attr_init(&thread_attr);
 		while (pthread_create(&signal_thread, &thread_attr,
 				      _srun_signal_mgr, job)) {
@@ -616,9 +626,9 @@ extern void pre_launch_srun_job(srun_job_t *job, bool slurm_started)
 }
 
 extern void fini_srun(srun_job_t *job, bool got_alloc, uint32_t *global_rc,
-		      pthread_t signal_thread, bool slurm_started)
+		      bool slurm_started)
 {
-	/* If running from poe Most of this already happened in srun. */
+	/* If running from poe, most of this already happened in srun. */
 	if (slurm_started)
 		goto cleanup;
 	if (got_alloc) {
@@ -714,14 +724,15 @@ _compute_task_count(allocation_info_t *ainfo)
 #if defined HAVE_BGQ
 //#if defined HAVE_BGQ && HAVE_BG_FILES
 	/* always return the ntasks here for Q */
-	info("returning %d", opt.ntasks);
 	return opt.ntasks;
 #endif
 	if (opt.cpus_set) {
 		for (i = 0; i < ainfo->num_cpu_groups; i++)
 			cnt += ( ainfo->cpu_count_reps[i] *
 				 (ainfo->cpus_per_node[i]/opt.cpus_per_task));
-	}
+	} else if (opt.ntasks_per_node != NO_VAL)
+		cnt = ainfo->nnodes * opt.ntasks_per_node;
+
 	return (cnt < ainfo->nnodes) ? ainfo->nnodes : cnt;
 }
 
@@ -768,7 +779,7 @@ _job_create_structure(allocation_info_t *ainfo)
 
 #if !defined HAVE_FRONT_END || (defined HAVE_BGQ)
 //#if !defined HAVE_FRONT_END || (defined HAVE_BGQ && defined HAVE_BG_FILES)
-	if(opt.min_nodes > job->nhosts) {
+	if (opt.min_nodes > job->nhosts) {
 		error("Only allocated %d nodes asked for %d",
 		      job->nhosts, opt.min_nodes);
 		if (opt.exc_nodes) {
@@ -776,11 +787,13 @@ _job_create_structure(allocation_info_t *ainfo)
 			 * are explicitly excluded, this error can occur. */
 			error("Are required nodes explicitly excluded?");
 		}
+		xfree(job);
 		return NULL;
 	}
 	if ((ainfo->cpus_per_node == NULL) ||
 	    (ainfo->cpu_count_reps == NULL)) {
 		error("cpus_per_node array is not set");
+		xfree(job);
 		return NULL;
 	}
 #endif

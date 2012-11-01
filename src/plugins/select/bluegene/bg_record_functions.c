@@ -333,6 +333,7 @@ extern void copy_bg_record(bg_record_t *fir_record, bg_record_t *sec_record)
 	}
 
 	xfree(sec_record->bg_block_id);
+	sec_record->action = fir_record->action;
 	sec_record->bg_block_id = xstrdup(fir_record->bg_block_id);
 
 	if (sec_record->ba_mp_list)
@@ -519,10 +520,15 @@ extern int bg_record_sort_aval_inc(bg_record_t* rec_a, bg_record_t* rec_b)
 	/* else if (rec_a->avail_cnode_cnt && !rec_b->avail_cnode_cnt) */
 	/* 	return -1; */
 
-	if (rec_a->avail_cnode_cnt > rec_b->avail_cnode_cnt)
-		return 1;
-	else if (rec_a->avail_cnode_cnt < rec_b->avail_cnode_cnt)
-		return -1;
+	if (rec_a->job_list && rec_b->job_list) {
+		/* we only want to use this sort on 1 midplane blocks
+		   that are used for sharing
+		*/
+		if (rec_a->avail_cnode_cnt > rec_b->avail_cnode_cnt)
+			return 1;
+		else if (rec_a->avail_cnode_cnt < rec_b->avail_cnode_cnt)
+			return -1;
+	}
 
 	if (rec_a->avail_job_end > rec_b->avail_job_end)
 		return 1;
@@ -954,13 +960,14 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 			 bool slurmctld_locked, char *reason)
 {
 	List requests = NULL;
-	List delete_list = NULL;
+	List delete_list = NULL, pass_list = NULL;
 	ListIterator itr = NULL;
 	bg_record_t *bg_record = NULL, *found_record = NULL,
 		tmp_record, *error_bg_record = NULL;
 	bg_record_t *smallest_bg_record = NULL;
 	struct node_record *node_ptr = NULL;
 	int mp_bit = 0;
+	bool has_pass = 0;
 	static int io_cnt = NO_VAL;
 	static int create_size = NO_VAL;
 	static select_ba_request_t blockreq;
@@ -1034,10 +1041,18 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 		if (bg_record->destroy)
 			continue;
 
-		if (!bit_test(bg_record->mp_bitmap, mp_bit))
+		if (!bit_test(bg_record->mp_bitmap, mp_bit)
+#ifndef HAVE_BG_L_P
+		    /* In BGQ if a nodeboard goes down you can no
+		       longer use any block using that nodeboard in a
+		       passthrough, so we need to remove it.
+		    */
+		    && !(has_pass = block_mp_passthrough(bg_record, mp_bit))
+#endif
+			)
 			continue;
 
-		if (!blocks_overlap(bg_record, &tmp_record))
+		if (!has_pass && !blocks_overlap(bg_record, &tmp_record))
 			continue;
 
 		if (bg_record->job_running > NO_JOB_RUNNING) {
@@ -1054,13 +1069,29 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 		/* If Running Dynamic mode and the block is
 		   smaller than the create size just continue on.
 		*/
-		if ((bg_conf->layout_mode == LAYOUT_DYNAMIC)
-		    && (bg_record->cnode_cnt < create_size)) {
-			if (!delete_list)
-				delete_list = list_create(NULL);
-			list_append(delete_list, bg_record);
+		if (bg_conf->layout_mode == LAYOUT_DYNAMIC) {
+			if (bg_record->cnode_cnt < create_size) {
+				if (!delete_list)
+					delete_list = list_create(NULL);
+				list_append(delete_list, bg_record);
+				continue;
+			} else if (has_pass) {
+				/* Set it up so the passthrough blocks
+				   get removed since they are no
+				   longer valid.
+				*/
+				if (!pass_list)
+					pass_list = list_create(NULL);
+				list_append(pass_list, bg_record);
+				continue;
+			}
+		} else if (has_pass) /* on non-dynamic systems this
+					block doesn't really mean
+					anything we just needed to
+					fail the job (which was
+					probably already failed).
+				     */
 			continue;
-		}
 
 		/* keep track of the smallest size that is at least
 		   the size of create_size. */
@@ -1101,14 +1132,11 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 		slurm_mutex_unlock(&block_state_mutex);
 		debug("No block under 1 midplane available for this nodecard.  "
 		      "Draining the whole node.");
-		if (!node_already_down(mp_name)) {
-			if (slurmctld_locked)
-				drain_nodes(mp_name, reason,
-					    slurm_get_slurm_user_id());
-			else
-				slurm_drain_nodes(mp_name, reason,
-						  slurm_get_slurm_user_id());
-		}
+
+		/* the slurmctld is always locked here */
+		if (!node_already_down(mp_name))
+			drain_nodes(mp_name, reason,
+				    slurm_get_slurm_user_id());
 		rc = SLURM_SUCCESS;
 		goto cleanup;
 	}
@@ -1224,15 +1252,10 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 			break;
 		case 512:
 			slurm_mutex_unlock(&block_state_mutex);
-			if (!node_already_down(mp_name)) {
-				if (slurmctld_locked)
-					drain_nodes(mp_name, reason,
-						    slurm_get_slurm_user_id());
-				else
-					slurm_drain_nodes(
-						mp_name, reason,
-						slurm_get_slurm_user_id());
-			}
+			/* the slurmctld is always locked here */
+			if (!node_already_down(mp_name))
+				drain_nodes(mp_name, reason,
+					    slurm_get_slurm_user_id());
 			rc = SLURM_SUCCESS;
 			goto cleanup;
 			break;
@@ -1296,7 +1319,11 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 		list_iterator_destroy(itr);
 	}
 
-	delete_list = list_create(NULL);
+	if (pass_list) {
+		delete_list = pass_list;
+		pass_list = NULL;
+	} else
+		delete_list = list_create(NULL);
 	while ((bg_record = list_pop(requests))) {
 		itr = list_iterator_create(bg_lists->main);
 		while ((found_record = list_next(itr))) {
@@ -1305,7 +1332,6 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 			if (!blocks_overlap(bg_record, found_record))
 				continue;
 			list_push(delete_list, found_record);
-			list_remove(itr);
 		}
 		list_iterator_destroy(itr);
 
@@ -1350,6 +1376,12 @@ cleanup:
 		if (slurmctld_locked)
 			lock_slurmctld(job_write_lock);
 	}
+
+	if (pass_list) {
+		delete_list = pass_list;
+		pass_list = NULL;
+	}
+
 	if (delete_list) {
 		bool delete_it = 0;
 		if (bg_conf->layout_mode == LAYOUT_DYNAMIC)

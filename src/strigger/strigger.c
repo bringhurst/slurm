@@ -98,7 +98,7 @@ static int _clear_trigger(void)
 	trigger_info_t ti;
 	char tmp_c[128];
 
-	memset(&ti, 0, sizeof(trigger_info_t));
+	slurm_init_trigger_msg(&ti);
 	ti.trig_id	= params.trigger_id;
 	ti.user_id	= params.user_id;
 	if (params.job_id) {
@@ -116,7 +116,7 @@ static int _clear_trigger(void)
 
 	if (params.job_id)
 		verbose("triggers for job %s cleared", ti.res_id);
-	else if (params.user_id)
+	else if (params.user_id != NO_VAL)
 		verbose("triggers for user %u cleared", ti.user_id);
 	else
 		verbose("trigger %u cleared", ti.trig_id);
@@ -128,7 +128,7 @@ static int _set_trigger(void)
 	trigger_info_t ti;
 	char tmp_c[128];
 
-	memset(&ti, 0, sizeof(trigger_info_t));
+	slurm_init_trigger_msg (&ti);
 	if (params.job_id) {
 		ti.res_type = TRIGGER_RES_TYPE_JOB;
 		snprintf(tmp_c, sizeof(tmp_c), "%u", params.job_id);
@@ -309,7 +309,7 @@ static int _get_trigger(void)
 			    trig_msg->trigger_array[i].trig_id)
 				continue;
 		}
-		if (params.user_id) {
+		if (params.user_id != NO_VAL) {
 			if (params.user_id !=
 			    trig_msg->trigger_array[i].user_id)
 				continue;

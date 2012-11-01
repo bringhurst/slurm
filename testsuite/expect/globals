@@ -45,7 +45,17 @@
 
 global sacctmgr sacct salloc sattach sbatch sbcast scancel scontrol sinfo smap squeue sreport srun sstat strigger
 
-# Conditional set.  Only set variable if variable does not yet exist.
+################################################################
+#
+# Proc: cset
+#
+# Purpose: Conditional set.  Only set variable if variable does not yet exist.
+#
+# Input: name  -- name of the variable to set
+#	 value -- value to set to 'name'
+#
+################################################################
+
 proc cset {name value} {
 	if {![uplevel 1 info exists $name]} {
 		upvar $name tmp
@@ -105,7 +115,9 @@ cset partition ""
 # OR for other versions of MPICH, use this
 cset mpicc       "/usr/local/bin/mpicc"
 cset use_pmi	0
-cset upcc       "/usr/local/bin/upcc"
+#cset upcc       "/usr/local/bin/upcc"
+cset upcc       "/usr/bin/xlupc"
+cset oshcc      "/usr/local/bin/oshcc"
 
 # If using XCPU job launch, specify directory location as needed
 cset xcpu_dir	"/mnt/xcpu"
@@ -138,7 +150,8 @@ cset bin_echo	"echo"
 cset bin_env	"env"
 cset bin_file	"file"
 cset bin_id	"id"
-cset bin_grep    "grep"
+cset bin_grep   "grep"
+cset bin_head   "head"
 
 # Don't user $bin_hostname unless on a front-end system that
 # doesn't fully use the slurmd, use $bin_printenv SLURMD_NODENAME
@@ -749,13 +762,11 @@ proc test_assoc_enforced { } {
 
 ################################################################
 #
-# Proc: test_assoc_enforced
+# Proc: test_limits_enforced
 #
-# Purpose: Determine if we need an association to run a job.
-# This is based upon
-# the value of AccountingStorageEnforce in the slurm.conf.
+# Purpose: Check if AccountingStorageEnforce limits is set
 #
-# Returns level of association enforcement, 0 if none
+# Returns 1 if limits is set, else 0
 #
 ################################################################
 proc test_limits_enforced { } {
@@ -1340,6 +1351,37 @@ proc test_switch_nrt { } {
 
 	return $switch_nrt
 }
+
+################################################################
+#
+# Proc: test_launch_poe
+#
+# Purpose: Determine if the system is using launch/poe.
+#
+# Returns 1 if the system is running launch/poe, 0 otherwise
+#
+################################################################
+
+proc test_launch_poe { } {
+	global scontrol bin_bash bin_grep
+
+	log_user 0
+	set launch_poe 0
+	spawn -noecho $bin_bash -c "exec $scontrol show config | $bin_grep LaunchType"
+	expect {
+		"launch/poe" {
+			set launch_poe 1
+			exp_continue
+		}
+		eof {
+			wait
+		}
+	}
+	log_user 1
+
+	return $launch_poe
+}
+
 ################################################################
 #
 # Proc: test_emulated
@@ -1546,10 +1588,20 @@ proc test_super_user { } {
 	return $super_user
 }
 
-# Create a 16 bit hex number from a signed decimal number
-# Replace all non-decimal characters
+################################################################
+#
+# Proc: dec2hex16
+#
+# Purpose: Create a 16 bit hex number from a signed decimal number
+#
+# Returns: 16 bit hex version of input 'value'
+#
+# Input: value -- decimal number to convert
+#
 # Courtesy of Chris Cornish
 # http://aspn.activestate.com/ASPN/Cookbook/Tcl/Recipe/415982
+################################################################
+# Replace all non-decimal characters
 proc dec2hex16 {value} {
 	regsub -all {[^0-x\.-]} $value {} newtemp
 	set value [string trim $newtemp]
@@ -1563,10 +1615,20 @@ proc dec2hex16 {value} {
 	}
 }
 
-# Create a 32 bit hex number from a signed decimal number
-# Replace all non-decimal characters
+################################################################
+#
+# Proc: dec2hex32
+#
+# Purpose: Create a 32 bit hex number from a signed decimal number
+#
+# Returns: 32 bit hex version of input 'value'
+#
+# Input: value -- decimal number to convert
+#
 # Courtesy of Chris Cornish
 # http://aspn.activestate.com/ASPN/Cookbook/Tcl/Recipe/415982
+################################################################
+# Replace all non-decimal characters
 proc dec2hex {value} {
 	regsub -all {[^0-x\.-]} $value {} newtemp
 	set value [string trim $newtemp]
@@ -1727,7 +1789,15 @@ proc make_bash_script { script_name script_contents } {
 }
 
 ################################################################
-# Given a hostname, return it's numeric suffix
+#
+# Proc: get_suffix
+#
+# Purpose: Given a hostname, return it's numeric suffix
+#
+# Returns: numerical suffix for input 'hostname'
+#
+# Input: hostname -- hostname for which to return suffix
+#
 ################################################################
 proc get_suffix { hostname } {
 	set host_len [string length $hostname]
@@ -1755,9 +1825,13 @@ proc get_suffix { hostname } {
 }
 
 ################################################################
-# Check if we are user root or SlurmUser
 #
-# Return 1 if true, 0 if false
+# Proc: is_super_user
+#
+# Purpose: Check if we are user root or SlurmUser
+#
+# Returns: 1 if true, 0 if false
+#
 ################################################################
 
 proc is_super_user { } {
@@ -1797,7 +1871,11 @@ proc is_super_user { } {
 
 ################################################################
 #
+# Proc: check_acct_associations
 #
+# Purpose: Use sacctmgr to check associations
+#
+# Returns: 0 on any error
 #
 ################################################################
 proc check_acct_associations { } {
@@ -1871,7 +1949,11 @@ proc check_acct_associations { } {
 
 ################################################################
 #
+# Proc:check_accounting_admin_level
 #
+# Purpose: get the admin_level for the current user
+#
+# Returns: admin_level for the current user
 #
 ################################################################
 proc check_accounting_admin_level { } {
@@ -1923,7 +2005,11 @@ proc check_accounting_admin_level { } {
 
 ################################################################
 #
+# Proc: get_cluster_name
 #
+# Purpose: get the cluster name
+#
+# Returns: name of the cluster
 #
 ################################################################
 proc get_cluster_name { } {

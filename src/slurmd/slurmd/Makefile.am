@@ -6,7 +6,7 @@ AUTOMAKE_OPTIONS = foreign
 sbin_PROGRAMS = slurmd
 
 AM_CPPFLAGS = -DLIBSLURM_SO=\"$(libdir)/libslurm.so\"
-INCLUDES = -I$(top_srcdir)
+INCLUDES = -I$(top_srcdir) $(HWLOC_CPPFLAGS)
 
 slurmd_LDADD = 					   \
 	$(top_builddir)/src/common/libdaemonize.la \
@@ -27,9 +27,11 @@ slurmd_SOURCES = $(SLURMD_SOURCES)
 if HAVE_AIX
 # We need to set maxdata back to 0 because this effects the "max memory size"
 # ulimit, and the ulimit is inherited by child processes.
-slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) -Wl,-bmaxdata:0x0
+slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) \
+	$(HWLOC_LDFLAGS) $(HWLOC_LIBS) -Wl,-bmaxdata:0x0
 else
-slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+slurmd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) \
+	$(HWLOC_LDFLAGS) $(HWLOC_LIBS)
 endif
 
 force:

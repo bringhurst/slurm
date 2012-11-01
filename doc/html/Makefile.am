@@ -29,6 +29,7 @@ generated_html = \
 	help.html \
 	high_throughput.html \
 	ibm.html \
+	ibm-pe.html \
 	jobacct_gatherplugins.html \
 	job_exit_code.html \
 	job_launch.html \
@@ -46,16 +47,17 @@ generated_html = \
 	multi_cluster.html \
 	news.html \
 	overview.html \
-	poe.html \
 	platforms.html \
 	plugins.html \
 	power_save.html \
 	preempt.html \
 	preemption_plugins.html \
 	priority_multifactor.html \
+	priority_multifactor2.html \
 	priority_plugins.html \
 	proctrack_plugins.html \
 	programmer_guide.html \
+	prolog_epilog.html \
 	publications.html \
 	qos.html \
 	quickstart_admin.html \
@@ -76,7 +78,8 @@ generated_html = \
 	testimonials.html \
 	topology.html \
 	topology_plugin.html \
-	troubleshoot.html
+	troubleshoot.html \
+	tutorials.html
 
 html_DATA = \
 	${generated_html} \
@@ -98,12 +101,14 @@ html_DATA = \
 	plane_ex5.gif \
 	plane_ex6.gif \
 	plane_ex7.gif \
-	slurm_banner.gif \
+	slurm_logo.png \
+	schedmd.png \
 	slurm_design.pdf \
 	slurmstyles.css \
 	sponsors.gif \
 	topo_ex1.gif \
 	topo_ex2.gif \
+	tutorial_intro_files.tar \
 	usage_pies.gif
 
 MOSTLYCLEANFILES = ${generated_html}

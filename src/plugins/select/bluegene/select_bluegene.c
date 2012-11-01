@@ -58,6 +58,7 @@
  * overwritten when linking with the slurmctld.
  */
 #if defined (__APPLE__)
+slurmctld_config_t slurmctld_config __attribute__((weak_import));
 slurm_ctl_conf_t slurmctld_conf __attribute__((weak_import));
 struct node_record *node_record_table_ptr  __attribute__((weak_import)) = NULL;
 int bg_recover __attribute__((weak_import)) = NOT_FROM_CONTROLLER;
@@ -71,6 +72,7 @@ void *acct_db_conn  __attribute__((weak_import)) = NULL;
 char *slurmctld_cluster_name  __attribute__((weak_import)) = NULL;
 slurmdb_cluster_rec_t *working_cluster_rec  __attribute__((weak_import)) = NULL;
 #else
+slurmctld_config_t slurmctld_config;
 slurm_ctl_conf_t slurmctld_conf;
 struct node_record *node_record_table_ptr = NULL;
 int bg_recover = NOT_FROM_CONTROLLER;
@@ -567,47 +569,6 @@ static void _pack_block(bg_record_t *bg_record, Buf buffer,
 		packstr(bg_record->reason, buffer);
 		pack16((uint16_t)bg_record->state, buffer);
 		packnull(buffer); /* for mp_used_inx */
-	} else if (protocol_version >= SLURM_2_2_PROTOCOL_VERSION) {
-		packstr(bg_record->bg_block_id, buffer);
-#ifdef HAVE_BGL
-		packstr(bg_record->blrtsimage, buffer);
-#endif
-		pack_bit_fmt(bg_record->mp_bitmap, buffer);
-		pack16((uint16_t)bg_record->conn_type[0], buffer);
-		packstr(bg_record->ionode_str, buffer);
-		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
-		pack32((uint32_t)bg_record->job_running, buffer);
-		packstr(bg_record->linuximage, buffer);
-		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->mp_str, buffer);
-		pack32((uint32_t)bg_record->cnode_cnt, buffer);
-#ifdef HAVE_BGL
-		pack16((uint16_t)bg_record->node_use, buffer);
-#endif
-		packnull(buffer); /* for user_name */
-		packstr(bg_record->ramdiskimage, buffer);
-		packstr(bg_record->reason, buffer);
-		pack16((uint16_t)bg_record->state, buffer);
-	} else if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
-		packstr(bg_record->bg_block_id, buffer);
-#ifdef HAVE_BGL
-		packstr(bg_record->blrtsimage, buffer);
-#endif
-		pack_bit_fmt(bg_record->mp_bitmap, buffer);
-		pack16((uint16_t)bg_record->conn_type[0], buffer);
-		packstr(bg_record->ionode_str, buffer);
-		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
-		pack32((uint32_t)bg_record->job_running, buffer);
-		packstr(bg_record->linuximage, buffer);
-		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->mp_str, buffer);
-		pack32((uint32_t)bg_record->cnode_cnt, buffer);
-#ifdef HAVE_BGL
-		pack16((uint16_t)bg_record->node_use, buffer);
-#endif
-		packnull(buffer); /* for user_name */
-		packstr(bg_record->ramdiskimage, buffer);
-		pack16((uint16_t)bg_record->state, buffer);
 	}
 }
 
@@ -762,10 +723,6 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	if (ver_str) {
 		if (!strcmp(ver_str, BLOCK_STATE_VERSION)) {
 			protocol_version = SLURM_PROTOCOL_VERSION;
-		} else if (!strcmp(ver_str, BLOCK_2_2_STATE_VERSION)) {
-			protocol_version = SLURM_2_2_PROTOCOL_VERSION;
-		} else if (!strcmp(ver_str, BLOCK_2_1_STATE_VERSION)) {
-			protocol_version = SLURM_2_1_PROTOCOL_VERSION;
 		}
 	}
 
@@ -780,16 +737,6 @@ static int _load_state_file(List curr_block_list, char *dir_name)
 	}
 	xfree(ver_str);
 	safe_unpack32(&record_count, buffer);
-
-	/* In older versions of the code we stored things in a
-	   block_info_msg_t.  This isn't the case anymore so in the
-	   newer code we don't store the timestamp since it isn't
-	   really needed.
-	*/
-	if (protocol_version <= SLURM_2_2_PROTOCOL_VERSION) {
-		time_t last_save;
-		safe_unpack_time(&last_save, buffer);
-	}
 
 	slurm_mutex_lock(&block_state_mutex);
 	reset_ba_system(true);
@@ -1736,6 +1683,7 @@ extern int select_p_block_init(List part_list)
  * IN/OUT preemptee_job_list - Pointer to list of job pointers. These are the
  *		jobs to be preempted to initiate the pending job. Not set
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
+ * IN exc_core_bitmap - bitmap of cores being reserved.
  * RET zero on success, EINVAL otherwise
  * NOTE: bitmap must be a superset of req_nodes at the time that
  *	select_p_job_test is called
@@ -1744,7 +1692,8 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
 			     List preemptee_candidates,
-			     List *preemptee_job_list)
+			     List *preemptee_job_list,
+			     bitstr_t *exc_core_bitmap)
 {
 #ifdef HAVE_BG
 	/* submit_job - is there a block where we have:
@@ -2199,7 +2148,7 @@ extern int select_p_pack_select_info(time_t last_query_time,
 		pack32(blocks_packed, buffer);
 		pack_time(last_bg_update, buffer);
 
-		if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+		if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 			if (bg_lists->main) {
 				slurmctld_lock_t job_read_lock =
 					{ NO_LOCK, READ_LOCK,
@@ -2363,6 +2312,8 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 	bg_record = find_bg_record_in_list(bg_lists->main,
 					   block_desc_ptr->bg_block_id);
 	if (!bg_record) {
+		error("update_block: block %s not found",
+		      block_desc_ptr->bg_block_id);
 		slurm_mutex_unlock(&block_state_mutex);
 		return ESLURM_INVALID_BLOCK_NAME;
 	}
@@ -2446,6 +2397,8 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 	if (block_desc_ptr->state == BG_BLOCK_ERROR_FLAG) {
 		bg_record_t *found_record = NULL;
 		List delete_list = list_create(NULL);
+		bool delete_it = 0;
+
 		/* This loop shouldn't do much in regular Dynamic mode
 		   since there shouldn't be overlapped blocks.  But if
 		   there is a trouble block that isn't going away and
@@ -2492,11 +2445,14 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 				       found_record->bg_block_id,
 				       bg_record->bg_block_id);
 			}
+			resume_block(found_record);
 			list_push(delete_list, found_record);
 		}
 		list_iterator_destroy(itr);
 		slurm_mutex_unlock(&block_state_mutex);
-		free_block_list(NO_VAL, delete_list, 0, 0);
+		if (bg_conf->layout_mode == LAYOUT_DYNAMIC)
+			delete_it = 1;
+		free_block_list(NO_VAL, delete_list, delete_it, 0);
 		list_destroy(delete_list);
 		put_block_in_error_state(bg_record, reason);
 	} else if (block_desc_ptr->state == BG_BLOCK_FREE) {
@@ -2914,12 +2870,13 @@ extern int select_p_fail_cnode(struct step_record *step_ptr)
 
 	itr = list_iterator_create(bg_lists->main);
 	while ((bg_record = (bg_record_t *)list_next(itr))) {
+		float err_ratio;
 		if (!bit_overlap(step_ptr->step_node_bitmap,
 				 bg_record->mp_bitmap))
 			continue;
+		bg_record->cnode_err_cnt = 0;
 		itr2 = list_iterator_create(bg_record->ba_mp_list);
 		while ((found_ba_mp = (ba_mp_t *)list_next(itr2))) {
-			float err_ratio;
 
 			if (!found_ba_mp->used
 			    || !bit_test(step_ptr->step_node_bitmap,
@@ -2940,25 +2897,25 @@ extern int select_p_fail_cnode(struct step_record *step_ptr)
 
 			bit_or(found_ba_mp->cnode_err_bitmap,
 			       ba_mp->cnode_err_bitmap);
-			bg_record->cnode_err_cnt =
+			bg_record->cnode_err_cnt +=
 				bit_set_count(found_ba_mp->cnode_err_bitmap);
-
-
-			err_ratio = (float)bg_record->cnode_err_cnt
-				/ (float)bg_record->cnode_cnt;
-                        bg_record->err_ratio = err_ratio * 100;
-
-			/* handle really small ratios */
-			if (!bg_record->err_ratio && bg_record->cnode_err_cnt)
-				bg_record->err_ratio = 1;
-
-			debug("select_p_fail_cnode: "
-			      "count in error for %s is %u with ratio at %u",
-			      bg_record->bg_block_id,
-			      bg_record->cnode_err_cnt,
-			      bg_record->err_ratio);
 		}
 		list_iterator_destroy(itr2);
+
+		err_ratio = (float)bg_record->cnode_err_cnt
+			/ (float)bg_record->cnode_cnt;
+		bg_record->err_ratio = err_ratio * 100;
+
+		/* handle really small ratios */
+		if (!bg_record->err_ratio && bg_record->cnode_err_cnt)
+			bg_record->err_ratio = 1;
+
+		debug("select_p_fail_cnode: "
+		      "count in error for %s is %u with ratio at %u",
+		      bg_record->bg_block_id,
+		      bg_record->cnode_err_cnt,
+		      bg_record->err_ratio);
+
 	}
 	list_iterator_destroy(itr);
 	slurm_mutex_unlock(&ba_system_mutex);

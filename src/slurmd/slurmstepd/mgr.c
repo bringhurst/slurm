@@ -85,6 +85,7 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/common/cbuf.h"
+#include "src/common/cpu_frequency.h"
 #include "src/common/env.h"
 #include "src/common/fd.h"
 #include "src/common/forward.h"
@@ -1063,8 +1064,16 @@ fail2:
 		_wait_for_io(job);
 
 	/*
+	 * Reset cpu frequency if it was changed
+	 */
+
+	if (job->cpu_freq != NO_VAL)
+		cpu_freq_reset(job);
+
+	/*
 	 * Warn task plugin that the user's step have terminated
 	 */
+
 	post_step(job);
 
 	/*
@@ -1103,13 +1112,16 @@ fail1:
 }
 
 static int
-_spank_task_privileged(slurmd_job_t *job, int taskid, struct priv_state *sp)
+_pre_task_privileged(slurmd_job_t *job, int taskid, struct priv_state *sp)
 {
 	if (_reclaim_privileges(sp) < 0)
 		return SLURM_ERROR;
 
 	if (spank_task_privileged (job, taskid) < 0)
 		return error("spank_task_init_privileged failed");
+
+	if (pre_launch_priv(job) < 0)
+		return error("pre_launch_priv failed");
 
 	return(_drop_privileges (job, true, sp));
 }
@@ -1148,8 +1160,10 @@ static void exec_wait_info_destroy (struct exec_wait_info *e)
 	if (e == NULL)
 		return;
 
-	close (e->parentfd);
-	close (e->childfd);
+	if (e->parentfd >= 0)
+		close (e->parentfd);
+	if (e->childfd >= 0)
+		close (e->childfd);
 	e->id = -1;
 	e->pid = -1;
 }
@@ -1172,9 +1186,17 @@ static struct exec_wait_info * fork_child_with_wait_info (int id)
 		exec_wait_info_destroy (e);
 		return (NULL);
 	}
-	else if (e->pid == 0)  /* In child, close parent fd */
+	/*
+	 *  Close parentfd in child, and childfd in parent:
+	 */
+	if (e->pid == 0) {
 		close (e->parentfd);
-
+		e->parentfd = -1;
+	}
+	else {
+		close (e->childfd);
+		e->childfd = -1;
+	}
 	return (e);
 }
 
@@ -1204,6 +1226,47 @@ static int exec_wait_signal (struct exec_wait_info *e, slurmd_job_t *job)
 	        job->jobid, job->stepid, e->id, e->parentfd);
 	exec_wait_signal_child (e);
 	return (0);
+}
+
+/*
+ *  Send SIGKILL to child in exec_wait_info 'e'
+ *  Returns 0 for success, -1 for failure.
+ */
+static int exec_wait_kill_child (struct exec_wait_info *e)
+{
+	if (e->pid < 0)
+		return (-1);
+	if (kill (e->pid, SIGKILL) < 0)
+		return (-1);
+	e->pid = -1;
+	return (0);
+}
+
+/*
+ *  Send all children in exec_wait_list SIGKILL.
+ *  Returns 0 for success or  < 0 on failure.
+ */
+static int exec_wait_kill_children (List exec_wait_list)
+{
+	int rc = 0;
+	int count;
+	struct exec_wait_info *e;
+	ListIterator i;
+
+	if ((count = list_count (exec_wait_list)) == 0)
+		return (0);
+
+	verbose ("Killing %d remaining child%s",
+		 count, (count > 1 ? "ren" : ""));
+
+	i = list_iterator_create (exec_wait_list);
+	if (i == NULL)
+		return error ("exec_wait_kill_children: iterator_create: %m");
+
+	while ((e = list_next (i)))
+		rc += exec_wait_kill_child (e);
+	list_iterator_destroy (i);
+	return (rc);
 }
 
 static void prepare_stdio (slurmd_job_t *job, slurmd_task_info_t *task)
@@ -1337,6 +1400,7 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 
 		if ((ei = fork_child_with_wait_info (i)) == NULL) {
 			error("child fork: %m");
+			exec_wait_kill_children (exec_wait_list);
 			rc = SLURM_ERROR;
 			goto fail4;
 		} else if ((pid = exec_wait_get_pid (ei)) == 0)  { /* child */
@@ -1361,7 +1425,7 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 			 *  Reclaim privileges and call any plugin hooks
 			 *   that may require elevated privs
 			 */
-			if (_spank_task_privileged(job, i, &sprivs) < 0)
+			if (_pre_task_privileged(job, i, &sprivs) < 0)
 				exit(1);
 
  			if (_become_user(job, &sprivs) < 0) {
@@ -1388,7 +1452,8 @@ _fork_all_tasks(slurmd_job_t *job, bool *io_initialized)
 			 *   children in any process groups or containers
 			 *   before they make a call to exec(2).
 			 */
-			exec_wait_child_wait_for_parent (ei);
+			if (exec_wait_child_wait_for_parent (ei) < 0)
+				exit (1);
 
 			exec_task(job, i);
 		}

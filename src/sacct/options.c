@@ -714,7 +714,7 @@ void parse_command_line(int argc, char **argv)
 			break;
 		case 'E':
 			job_cond->usage_end = parse_time(optarg, 1);
-			if (job_cond->usage_end == 0)
+			if (errno == ESLURM_INVALID_TIME_VALUE)
 				exit(1);
 			break;
 		case 'f':
@@ -822,9 +822,14 @@ void parse_command_line(int argc, char **argv)
 				PRINT_FIELDS_PARSABLE_NO_ENDING;
 			break;
 		case 'q':
-			if(!g_qos_list)
+			if (!g_qos_list) {
+				slurmdb_qos_cond_t qos_cond;
+				memset(&qos_cond, 0,
+				       sizeof(slurmdb_qos_cond_t));
+				qos_cond.with_deleted = 1;
 				g_qos_list = slurmdb_qos_get(
-					acct_db_conn, NULL);
+					acct_db_conn, &qos_cond);
+			}
 
 			if(!job_cond->qos_list)
 				job_cond->qos_list =
@@ -851,7 +856,7 @@ void parse_command_line(int argc, char **argv)
 			break;
 		case 'S':
 			job_cond->usage_start = parse_time(optarg, 1);
-			if (job_cond->usage_start == 0)
+			if (errno == ESLURM_INVALID_TIME_VALUE)
 				exit(1);
 			break;
 		case 'T':
@@ -1232,8 +1237,6 @@ void do_dump(void)
 
 	itr = list_iterator_create(jobs);
 	while((job = list_next(itr))) {
-		if(job->stats.cpu_min == NO_VAL)
-			job->stats.cpu_min = 0;
 
 		if(list_count(job->steps)) {
 			job->stats.cpu_ave /= list_count(job->steps);
@@ -1298,7 +1301,7 @@ void do_dump(void)
 			       step->ncpus,
 			       step->ncpus,
 			       step->elapsed);
-			printf("%d %d %d %d %d %d %d %d",
+			printf("%d %d %d %d %d %d %d %d ",
 			       step->tot_cpu_sec,
 			       step->tot_cpu_usec,
 			       (int)step->user_cpu_sec,
@@ -1356,7 +1359,7 @@ void do_dump(void)
 			       job->alloc_cpus,
 			       job->alloc_cpus,
 			       job->elapsed);
-			printf("%d %d %d %d %d %d %d %d",
+			printf("%d %d %d %d %d %d %d %d ",
 			       job->tot_cpu_sec,
 			       job->tot_cpu_usec,
 			       (int)job->user_cpu_sec,
@@ -1452,9 +1455,6 @@ void do_list(void)
 
 	itr = list_iterator_create(jobs);
 	while((job = list_next(itr))) {
-		if(job->stats.cpu_min == NO_VAL)
-			job->stats.cpu_min = 0;
-
 		if(list_count(job->steps)) {
 			int cnt = list_count(job->steps);
 			job->stats.cpu_ave /= (double)cnt;

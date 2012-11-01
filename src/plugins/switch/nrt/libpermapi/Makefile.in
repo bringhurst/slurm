@@ -212,6 +212,7 @@ MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
 MKDIR_P = @MKDIR_P@
 MUNGE_CPPFLAGS = @MUNGE_CPPFLAGS@
+MUNGE_DIR = @MUNGE_DIR@
 MUNGE_LDFLAGS = @MUNGE_LDFLAGS@
 MUNGE_LIBS = @MUNGE_LIBS@
 MYSQL_CFLAGS = @MYSQL_CFLAGS@
@@ -342,13 +343,13 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 PLUGIN_FLAGS = -module -avoid-version --export-dynamic
 INCLUDES = -I$(top_srcdir) -I$(top_srcdir)/src/common \
-	 -I$(top_srcdir)/src/srun/libsrun
+	   -I$(top_srcdir)/src/srun/libsrun $(NRT_CPPFLAGS)
 
 
 # making a .la
 pkglib_LTLIBRARIES = libpermapi.la
 libpermapi_la_SOURCES = shr_64.c
-libpermapi_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS) $(DL_LIBS)
+libpermapi_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS) $(DL_LIBS) -Wl,-Bsymbolic
 libpermapi_la_LIBADD = $(top_builddir)/src/srun/libsrun/libsrun.la \
 	$(top_builddir)/src/api/libslurmhelper.la
 

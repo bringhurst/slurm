@@ -157,6 +157,7 @@ typedef struct srun_options {
 	uint16_t warn_time;	/* --signal=<int>@<time>	*/
 
 	bool hold;		/* --hold, -H			*/
+	char *hostfile;         /* location of hostfile if there is one */
 	bool labelio;		/* --label-output, -l		*/
 	bool unbuffered;        /* --unbuffered,   -u           */
 	bool allocate;		/* --allocate, 	   -A		*/
@@ -195,6 +196,7 @@ typedef struct srun_options {
 	int  max_launch_time;   /* Undocumented                 */
 	int  max_exit_timeout;  /* Undocumented                 */
 	int  msg_timeout;       /* Undocumented                 */
+	bool launch_cmd;        /* --launch_cmd                 */
 	char *network;		/* --network=			*/
 
 	/* BLUEGENE SPECIFIC */
@@ -215,6 +217,7 @@ typedef struct srun_options {
 	char *mail_user;	/* --mail-user			*/
 	uint8_t open_mode;	/* --open-mode=append|truncate	*/
 	int acctg_freq;		/* --acctg-freq=secs		*/
+	uint32_t cpu_freq;     	/* --cpu_freq=kilohertz		*/
 	bool pty;		/* --pty			*/
 	char *restart_dir;	/* --restart                    */
 	int argc;		/* length of argv array		*/

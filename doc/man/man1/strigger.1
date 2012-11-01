@@ -38,7 +38,7 @@ If desired, multiple trigger programs can be set for the same event.
 user \fISlurmUser\fR unless \fISlurmUser\fR is configured as user root.
 This is required for the \fIslurmctld\fR daemon to set the appropriate
 user and group IDs for the executed program.
-Also note that the program is executed on the same node that the
+Also note that the trigger program is executed on the same node that the
 \fIslurmctld\fR daemon uses rather than some allocated compute node.
 To check the value of \fISlurmUser\fR, run the command:
 
@@ -76,9 +76,10 @@ Trigger event when backup slurmctld assumes control.
 .TP
 \fB\-\-clear\fP
 Clear or delete a previously defined event trigger.
-The \fB\-\-id\fR, \fB\-\-jobid\fR or \fB\-\-userid\fR
+The \fB\-\-id\fR, \fB\-\-jobid\fR or \fB\-\-user\fR
 option must be specified to identify the trigger(s) to
 be cleared.
+Only user root or the trigger's creator can delete a trigger.
 
 .TP
 \fB\-d\fR, \fB\-\-down\fR
@@ -168,7 +169,10 @@ with the \fB\-\-jobid\fR option. When the \fB\-\-jobid\fR option is
 used in conjunction with the \fB\-\-up\fR, \fB\-\-down\fR or
 \fB\-\-drained\fR option,
 all nodes allocated to that job will considered the nodes used as a
-trigger event.
+trigger event.Since this option's argument is optional, for proper
+parsing the single letter option must be followed immediately with
+the value and not include a space between them. For example "\-ntux"
+and not "\-n tux".
 
 .TP
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
@@ -206,6 +210,8 @@ Register an event trigger based upon the supplied options.
 NOTE: An event is only triggered once. A new event trigger
 must be set established for future events of the same type
 to be processed.
+Triggers can only be set if the command is run by the user
+\fISlurmUser\fR unless \fISlurmUser\fR is configured as user root.
 
 .TP
 \fB\-t\fR, \fB\-\-time\fR
@@ -219,7 +225,9 @@ from a DOWN state.
 
 .TP
 \fB\-\-user\fR=\fIuser_name_or_id\fR
-Clear or get triggers associated with the specified user.
+Clear or get triggers created by the specified user.
+For example, a trigger created by user \fIroot\fR for a job created by user
+\fIadam\fR could be cleared with an option \fI\-\-user=root\fR.
 Specify either a user name or user ID.
 
 .TP

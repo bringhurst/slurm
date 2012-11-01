@@ -30,6 +30,7 @@ EXTRA_DIST = \
 	test1.13			\
 	test1.14			\
 	test1.15			\
+	test1.15.bash			\
 	test1.16			\
 	test1.17			\
 	test1.18			\
@@ -254,6 +255,7 @@ EXTRA_DIST = \
 	test11.5			\
 	test11.6			\
 	test11.7			\
+	test11.8			\
 	test12.1			\
 	test12.2			\
 	test12.2.prog.c			\

@@ -2150,9 +2150,11 @@ static void _slurm_rpc_job_sbcast_cred(slurm_msg_t * msg)
 		       job_info_msg->job_id, uid,
 		       slurm_strerror(error_code));
 		slurm_send_rc_msg(msg, error_code);
-	} else if ((sbcast_cred = create_sbcast_cred(slurmctld_config.cred_ctx,
-						     job_ptr->job_id,
-						     job_ptr->nodes)) == NULL){
+	} else if ((sbcast_cred =
+		    create_sbcast_cred(slurmctld_config.cred_ctx,
+				       job_ptr->job_id,
+				       job_ptr->nodes,
+				       job_ptr->end_time)) == NULL){
 		unlock_slurmctld(job_read_lock);
 		error("_slurm_rpc_job_sbcast_cred JobId=%u cred create error",
 		      job_info_msg->job_id);
@@ -2652,6 +2654,8 @@ static void _slurm_rpc_submit_batch_job(slurm_msg_t * msg)
 					  false, NULL, 0, uid, &job_ptr);
 		unlock_slurmctld(job_write_lock);
 		END_TIMER2("_slurm_rpc_submit_batch_job");
+		if (job_desc_msg->immediate && (error_code != SLURM_SUCCESS))
+			error_code = ESLURM_CAN_NOT_START_IMMEDIATELY;
 	}
 
 	/* return result */
@@ -4276,7 +4280,7 @@ static void _slurm_rpc_dump_stats(slurm_msg_t * msg)
 	response_msg.msg_type = RESPONSE_STATS_INFO;
 
 	if (request_msg->command_id == STAT_COMMAND_RESET) {
-		reset_stats();
+		reset_stats(1);
 		pack_all_stat(0, &dump, &dump_size, msg->protocol_version);
 		response_msg.data = dump;
 		response_msg.data_size = dump_size;

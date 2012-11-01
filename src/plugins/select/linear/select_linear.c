@@ -452,7 +452,7 @@ static uint16_t _get_avail_cpus(struct job_record *job_ptr, int index)
 {
 	struct node_record *node_ptr;
 	uint16_t avail_cpus;
-	uint16_t cpus, sockets, cores, threads;
+	uint16_t cpus, boards, sockets, cores, threads;
 	uint16_t cpus_per_task = 1;
 	uint16_t ntasks_per_node = 0, ntasks_per_socket, ntasks_per_core;
 	uint16_t min_sockets, min_cores, min_threads;
@@ -482,19 +482,24 @@ static uint16_t _get_avail_cpus(struct job_record *job_ptr, int index)
 	node_ptr = select_node_ptr + index;
 	if (select_fast_schedule) { /* don't bother checking each node */
 		cpus    = node_ptr->config_ptr->cpus;
+		boards  = node_ptr->config_ptr->boards;
 		sockets = node_ptr->config_ptr->sockets;
 		cores   = node_ptr->config_ptr->cores;
 		threads = node_ptr->config_ptr->threads;
 	} else {
 		cpus    = node_ptr->cpus;
+		boards  = node_ptr->boards;
 		sockets = node_ptr->sockets;
 		cores   = node_ptr->cores;
 		threads = node_ptr->threads;
 	}
 
 #if SELECT_DEBUG
-	info("host %s HW_ cpus %u sockets %u cores %u threads %u ",
-	     node_ptr->name, cpus, sockets, cores, threads);
+	info("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
+	     node_ptr->name, cpus, boards, sockets, cores, threads);
+#else
+	debug("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
+	      node_ptr->name, cpus, boards, sockets, cores, threads);
 #endif
 
 	avail_cpus = slurm_get_avail_procs(
@@ -2439,6 +2444,7 @@ top:	if ((rc != SLURM_SUCCESS) && preemptee_candidates &&
 					  (ListCmpF)_sort_usable_nodes_dec);
 				rc = EINVAL;
 				list_iterator_destroy(job_iterator);
+				_free_cr(exp_cr);
 				goto top;
 			}
 		}
@@ -2636,6 +2642,9 @@ extern int init ( void )
 	rc = _init_status_pthread();
 #endif
 	cr_type = slurmctld_conf.select_type_param;
+	if (cr_type)
+		verbose("%s loaded with argument %u", plugin_name, cr_type);
+
 	return rc;
 }
 
@@ -2733,6 +2742,7 @@ extern int select_p_block_init(List block_list)
  * IN/OUT preemptee_job_list - Pointer to list of job pointers. These are the
  *		jobs to be preempted to initiate the pending job. Not set
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
+ * IN exc_core_bitmap - bitmap of cores being reserved.
  * RET zero on success, EINVAL otherwise
  * globals (passed via select_p_node_init):
  *	node_record_count - count of nodes configured
@@ -2748,7 +2758,8 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
 			     List preemptee_candidates,
-			     List *preemptee_job_list)
+			     List *preemptee_job_list,
+			     bitstr_t *exc_core_bitmap)
 {
 	int max_share = 0, rc = EINVAL;
 

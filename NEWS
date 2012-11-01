@@ -1,6 +1,54 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 2.5.0.pre4
+=============================
+ -- Added Prolog and Epilog Guide (web page). Based upon work by Jason Sollom,
+    Cray Inc. and used by permission.
+ -- Restore gang scheduling functionality. Preemptor was not being scheduled.
+    Fix for bugzilla #3.
+ -- Add "cpu_load" to node information. Populate CPULOAD in node information
+    reported to Moab cluster manager.
+ -- Preempt jobs only when insufficient idle resources exist to start job,
+    regardless of the node weight.
+ -- Added priority/multifactor2 plugin based upon ticket distribution system.
+    Work by Janne Blomqvist, Aalto University.
+ -- Add SLURM_NODELIST to environment variables available to Prolog and Epilog.
+ -- Permit reservations to allow or deny access by account and/or user.
+ -- Add ReconfigFlags value of KeepPartState. See "man slurm.conf" for details.
+ -- Modify the task/cgroup plugin adding a task_pre_launch_priv function and
+    move slurmstepd outside of the step's cgroup. Work by Matthieu Hautreux.
+ -- Intel MIC processor support added using gres/mic plugin. BIG thanks to
+    Olli-Pekka Lehto, CSC-IT Center for Science Ltd.
+ -- Accounting - Change empty jobacctinfo structs to not actually be used
+    instead of putting 0's into the database we put NO_VALS and have sacct
+    figure out jobacct_gather wasn't used.
+ -- Cray - Prevent calling basil_confirm more than once per job using a flag.
+ -- Fix bug with topology/tree and job with min-max node count. Now try to
+    get max node count rather than minimizing leaf switches used.
+ -- Add AccountingStorageEnforce=safe option to provide method to avoid jobs
+    launching that wouldn't be able to run to completion because of a
+    GrpCPUMins limit.
+
+* Changes in SLURM 2.5.0.pre3
+=============================
+ -- Add Google search to all web pages.
+ -- Add sinfo -T option to print reservation information. Work by Bill Brophy,
+    Bull.
+ -- Force slurmd exit after 2 minute wait, even if threads are hung.
+ -- Change node_req field in struct job_resources from 8 to 32 bits so we can
+    run more than 256 jobs per node.
+ -- sched/backfill: Improve accuracy of expected job start with respect to
+    reservations.
+ -- sinfo partition field size will be set the the length of the longest
+    partition name by default.
+ -- Make it so the parse_time will return a valid 0 if given epoch time and
+    set errno == ESLURM_INVALID_TIME_VALUE on error instead.
+ -- Correct srun --no-alloc logic when node count exceeds node list or task
+    task count is not a multiple of the node count. Work by Hongjia Cao, NUDT.
+ -- Completed integration with IBM Parallel Environment including POE and IBM's
+    NRT switch library.
+
 * Changes in SLURM 2.5.0.pre2
 =============================
  -- When running with multiple slurmd daemons per node, enable specifying a
@@ -16,7 +64,10 @@ documents those changes that are of interest to users and admins.
  -- Add DebugFlag of Switch to log switch plugin details.
  -- Correct job node_cnt value in job completion plugin when job fails due to
     down node. Previously was too low by one.
-
+ -- Add new srun option --cpu-freq to enable user control over the job's CPU
+    frequency and thus it's power consumption. NOTE: cpu frequency is not
+    currently preserved for jobs being suspended and later resumed. Work by
+    Don Albert, Bull.
 
 * Changes in SLURM 2.5.0.pre1
 =============================
@@ -27,10 +78,121 @@ documents those changes that are of interest to users and admins.
  -- Change license option count separator from "*" to ":" for consistency with
     the gres option (e.g. "--licenses=foo:2 --gres=gpu:2"). The "*" will still
     be accepted, but is no longer documented.
- -- Permit more than 100 jobs to be scheduled per node (new limit is 10,000
+ -- Permit more than 100 jobs to be scheduled per node (new limit is 250
     jobs).
  -- Restructure of srun code to allow outside programs to utilize existing
     logic.
+
+* Changes in SLURM 2.4.4
+========================
+ -- BGQ - minor fix to make build work in emulated mode.
+ -- BGQ - Fix if large block goes into error and the next highest priority jobs
+    are planning on using the block.  Previously it would fail those jobs
+    erroneously.
+ -- BGQ - Fix issue when a cnode going to an error (not SoftwareError) state
+    with a job running or trying to run on it.
+ -- Execute slurm_spank_job_epilog when there is no system Epilog configured.
+ -- Fix for srun --test-only to work correctly with timelimits
+ -- BGQ - If a job goes away while still trying to free it up in the
+    database, and the job is running on a small block make sure we free up
+    the correct node count.
+ -- BGQ - Logic added to make sure a job has finished on a block before it is
+    purged from the system if its front-end node goes down.
+ -- Modify strigger so that a filter option of "--user=0" is supported.
+ -- Correct --mem-per-cpu logic for core or socket allocations with multiple
+    threads per core.
+ -- Fix for older < glibc 2.4 systems to use euidaccess() instead of eaccess().
+ -- BLUEGENE - Do not alter a pending job's node count when changing it's
+    partition.
+ -- Fix for older < glibc 2.4 systems to use euidaccess instead of eaccess.
+ -- BGQ - Add functionality to make it so we track the actions on a block.
+    This is needed for when a free request is added to a block but there are
+    jobs finishing up so we don't start new jobs on the block since they will
+    fail on start.
+ -- BGQ - Fixed InactiveLimit to work correctly to avoid scenarios where a
+    user's pending allocation was started with srun and then for some reason
+    the slurmctld was brought down and while it was down the srun was removed.
+ -- Fixed InactiveLimit math to work correctly
+ -- BGQ - Add logic to make it so blocks can't use a midplane with a nodeboard
+    in error for passthrough.
+ -- BGQ - Make it so if a nodeboard goes in error any block using that midplane
+    for passthrough gets removed on a dynamic system.
+ -- BGQ - Fix for printing realtime server debug correctly.
+ -- BGQ - Cleaner handling of cnode failures when reported through the runjob
+    interface instead of through the normal method.
+ -- smap - spread node information across multiple lines for larger systems.
+ -- Cray - Defer salloc until after PrologSlurmctld completes.
+ -- Correction to slurmdbd communications failure handling logic, incorrect
+    error codes returned in some cases.
+
+* Changes in SLURM 2.4.3
+========================
+ -- Accounting - Fix so complete 32 bit numbers can be put in for a priority.
+ -- cgroups - fix if initial directory is non-existent SLURM creates it
+    correctly.  Before the errno wasn't being checked correctly
+ -- BGQ - fixed srun when only requesting a task count and not a node count
+    to operate the same way salloc or sbatch did and assign a task per cpu
+    by default instead of task per node.
+ -- Fix salloc --gid to work correctly.  Reported by Brian Gilmer
+ -- BGQ - fix smap to set the correct default MloaderImage
+ -- BLUEGENE - updated documentation.
+ -- Close the batch job's environment file when it contains no data to avoid
+    leaking file descriptors.
+ -- Fix sbcast's credential to last till the end of a job instead of the
+    previous 20 minute time limit.  The previous behavior would fail for
+    large files 20 minutes into the transfer.
+ -- Return ESLURM_NODES_BUSY rather than ESLURM_NODE_NOT_AVAIL error on job
+    submit when required nodes are up, but completing a job or in exclusive
+    job allocation.
+ -- Add HWLOC_FLAGS so linking to libslurm works correctly
+ -- BGQ - If using backfill and a shared block is running at least one job
+    and a job comes through backfill and can fit on the block without ending
+    jobs don't set an end_time for the running jobs since they don't need to
+    end to start the job.
+ -- Initialize bind_verbose when using task/cgroup.
+ -- BGQ - Fix for handling backfill much better when sharing blocks.
+ -- BGQ - Fix for making small blocks on first pass if not sharing blocks.
+ -- BLUEGENE - Remove force of default conn_type instead of leaving NAV
+    when none are requested.  The Block allocator sets it up temporarily so
+    this isn't needed.
+ -- BLUEGENE - Fix deadlock issue when dealing with bad hardware if using
+    static blocks.
+ -- Fix to mysql plugin during rollup to only query suspended table when jobs
+    reported some suspended time.
+ -- Fix compile with glibc 2.16 (Kacper Kowalik)
+ -- BGQ - fix for deadlock where a block has error on it and all jobs
+    running on it are preemptable by scheduling job.
+ -- proctrack/cgroup: Exclude internal threads from "scontrol list pids".
+    Patch from Matthieu Hautreux, CEA.
+ -- Memory leak fixed for select/linear when preempting jobs.
+ -- Fix if updating begin time of a job to update the eligible time in
+    accounting as well.
+ -- BGQ - make it so you can signal steps when signaling the job allocation.
+ -- BGQ - Remove extra overhead if a large block has many cnode failures.
+ -- Priority/Multifactor - Fix issue with age factor when a job is estimated to
+    start in the future but is able to run now.
+ -- CRAY - update to work with ALPS 5.1
+ -- BGQ - Handle issue of speed and mutexes when polling instead of using the
+    realtime server.
+ -- BGQ - Fix minor sorting issue with sview when sorting by midplanes.
+ -- Accounting - Fix for handling per user max node/cpus limits on a QOS
+    correctly for current job.
+ -- Update documentation for -/+= when updating a reservation's
+    users/accounts/flags
+ -- Update pam module to work if using aliases on nodes instead of actual
+    host names.
+ -- Correction to task layout logic in select/cons_res for job with minimum
+    and maximum node count.
+ -- BGQ - Put final poll after realtime comes back into service to avoid
+    having the realtime server go down over and over again while waiting
+    for the poll to finish.
+ -- task/cgroup/memory - ensure that ConstrainSwapSpace=no is correctly
+    handled. Work by Matthieu Hautreux, CEA.
+ -- CRAY - Fix for sacct -N option to work correctly
+ -- CRAY - Update documentation to describe installation from rpm instead
+    or previous piecemeal method.
+ -- Fix sacct to work with QOS' that have previously been deleted.
+ -- Added all available limits to the output of sacctmgr list qos
 
 * Changes in SLURM 2.4.2
 ========================
@@ -57,6 +219,34 @@ documents those changes that are of interest to users and admins.
     multi midplane block allocation.
  -- BGQ - Make it possible for a multi midplane allocation to run on more
     than 1 midplane but not the entire allocation.
+ -- BGL - Fix for syncing users on block from Tim Wickberg
+ -- Fix initialization of protocol_version for some messages to make sure it
+    is always set when sending or receiving a message.
+ -- Reset backfilled job counter only when explicitly cleared using scontrol.
+    Patch from Alejandro Lucero Palau, BSC.
+ -- BLUEGENE - Fix for handling blocks when a larger block will not free and
+    while it is attempting to free underlying hardware is marked in error
+    making small blocks overlapping with the freeing block.  This only
+    applies to dynamic layout mode.
+ -- Cray and BlueGene - Do not treat lack of usable front-end nodes when
+    slurmctld deamon starts as a fatal error. Also preserve correct front-end
+    node for jobs when there is more than one front-end node and the slurmctld
+    daemon restarts.
+ -- Correct parsing of srun/sbatch input/output/error file names so that only
+    the name "none" is mapped to /dev/null and not any file name starting
+    with "none" (e.g. "none.o").
+ -- BGQ - added version string to the load of the runjob_mux plugin to verify
+    the current plugin has been loaded when using runjob_mux_refresh_config
+ -- CGROUPS - Use system mount/umount function calls instead of doing fork
+    exec of mount/umount from Janne Blomqvist.
+ -- BLUEGENE - correct start time setup when no jobs are blocking the way
+    from Mark Nelson
+ -- Fixed sacct --state=S query to return information about suspended jobs
+    current or in the past.
+ -- FRONTEND - Made error warning more apparent if a frontend node isn't
+    configured correctly.
+ -- BGQ - update documentation about runjob_mux_refresh_config which works
+    correctly as of IBM driver V1R1M1 efix 008.
 
 * Changes in SLURM 2.4.1
 ========================
@@ -357,6 +547,10 @@ documents those changes that are of interest to users and admins.
  -- Fix issue with assoc_mgr if a bad state file is given and the database
     isn't up at the time the slurmctld starts, not running the
     priority/multifactor plugin, and then the database is started up later.
+ -- Gres: If a gres has a count of one and an associated file then when doing
+    a reconfiguration, the node's bitmap was not cleared resulting in an
+    underflow upon job termination or removal from scheduling matrix by the
+    backfill scheduler.
 
 * Changes in SLURM 2.3.5
 ========================

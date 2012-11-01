@@ -57,6 +57,7 @@ node_info_to_hv(node_info_t *node_info, uint16_t node_scaling, HV *hv)
 	STORE_FIELD(hv, node_info, reason_time, time_t);
 	STORE_FIELD(hv, node_info, reason_uid, uint32_t);
 	STORE_FIELD(hv, node_info, slurmd_start_time, time_t);
+	STORE_FIELD(hv, node_info, boards, uint16_t);
 	STORE_FIELD(hv, node_info, sockets, uint16_t);
 	STORE_FIELD(hv, node_info, threads, uint16_t);
 	STORE_FIELD(hv, node_info, tmp_disk, uint32_t);
@@ -112,6 +113,7 @@ hv_to_node_info(HV *hv, node_info_t *node_info)
 	FETCH_FIELD(hv, node_info, reason_time, time_t, TRUE);
 	FETCH_FIELD(hv, node_info, reason_uid, uint32_t, TRUE);
 	FETCH_FIELD(hv, node_info, slurmd_start_time, time_t, TRUE);
+	FETCH_FIELD(hv, node_info, boards, uint16_t, TRUE);
 	FETCH_FIELD(hv, node_info, sockets, uint16_t, TRUE);
 	FETCH_FIELD(hv, node_info, threads, uint16_t, TRUE);
 	FETCH_FIELD(hv, node_info, tmp_disk, uint32_t, TRUE);
@@ -135,6 +137,9 @@ node_info_msg_to_hv(node_info_msg_t *node_info_msg, HV *hv)
 	/* record_count implied in node_array */
 	av = newAV();
 	for(i = 0; i < node_info_msg->record_count; i ++) {
+		if (!node_info_msg->node_array[i].name)
+			continue;
+
 		hv_info =newHV();
 		if (node_info_to_hv(node_info_msg->node_array + i,
 				    node_info_msg->node_scaling, hv_info) < 0) {

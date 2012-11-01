@@ -9,6 +9,9 @@ AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_AUX_DIR([auxdir])
 AC_CANONICAL_TARGET([])
 
+dnl the is a generic flag to avoid building things
+AM_CONDITIONAL(DONT_BUILD, test "1" = "0")
+
 X_AC_GPL_LICENSED
 
 #
@@ -401,6 +404,7 @@ AC_CONFIG_FILES([Makefile
 		 contribs/Makefile
 		 contribs/arrayrun/Makefile
 		 contribs/cray/Makefile
+		 contribs/cray/opt_modulefiles_slurm
 		 contribs/lua/Makefile
 		 contribs/pam/Makefile
 		 contribs/perlapi/Makefile
@@ -413,6 +417,17 @@ AC_CONFIG_FILES([Makefile
 		 contribs/phpext/slurm_php/config.m4
 		 contribs/sjobexit/Makefile
 		 contribs/slurmdb-direct/Makefile
+		 doc/Makefile
+		 doc/man/Makefile
+		 doc/man/man1/Makefile
+		 doc/man/man3/Makefile
+		 doc/man/man5/Makefile
+		 doc/man/man8/Makefile
+		 doc/html/Makefile
+		 doc/html/configurator.html
+		 doc/html/configurator.easy.html
+		 etc/init.d.slurm
+		 etc/init.d.slurmdbd
 		 src/Makefile
 		 src/api/Makefile
 		 src/common/Makefile
@@ -459,17 +474,19 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/auth/none/Makefile
 		 src/plugins/checkpoint/Makefile
 		 src/plugins/checkpoint/aix/Makefile
-		 src/plugins/checkpoint/none/Makefile
-		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/blcr/Makefile
 		 src/plugins/checkpoint/blcr/cr_checkpoint.sh
 		 src/plugins/checkpoint/blcr/cr_restart.sh
+		 src/plugins/checkpoint/none/Makefile
+		 src/plugins/checkpoint/ompi/Makefile
+		 src/plugins/checkpoint/poe/Makefile
 		 src/plugins/crypto/Makefile
 		 src/plugins/crypto/munge/Makefile
 		 src/plugins/crypto/openssl/Makefile
 		 src/plugins/gres/Makefile
 		 src/plugins/gres/gpu/Makefile
 		 src/plugins/gres/nic/Makefile
+		 src/plugins/gres/mic/Makefile
 		 src/plugins/jobacct_gather/Makefile
 		 src/plugins/jobacct_gather/linux/Makefile
 		 src/plugins/jobacct_gather/aix/Makefile
@@ -498,6 +515,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/priority/Makefile
 		 src/plugins/priority/basic/Makefile
 		 src/plugins/priority/multifactor/Makefile
+		 src/plugins/priority/multifactor2/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/aix/Makefile
 		 src/plugins/proctrack/cgroup/Makefile
@@ -547,15 +565,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/topology/node_rank/Makefile
 		 src/plugins/topology/none/Makefile
 		 src/plugins/topology/tree/Makefile
-		 doc/Makefile
-		 doc/man/Makefile
-		 doc/man/man1/Makefile
-		 doc/man/man3/Makefile
-		 doc/man/man5/Makefile
-		 doc/man/man8/Makefile
-		 doc/html/Makefile
-		 doc/html/configurator.html
-		 doc/html/configurator.easy.html
 		 testsuite/Makefile
 		 testsuite/expect/Makefile
 		 testsuite/slurm_unit/Makefile

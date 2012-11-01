@@ -43,6 +43,7 @@
 
 #include <string.h>
 
+#include "src/common/slurm_xlator.h"
 #include "src/common/xmalloc.h"
 #include "src/common/bitstring.h"
 #include "src/common/xassert.h"
@@ -74,6 +75,16 @@ task_state_t task_state_create (int ntasks)
 	ts->abnormal_exit = bit_alloc (ntasks);
 
 	return (ts);
+}
+
+void task_state_alter (task_state_t ts, int ntasks)
+{
+	xassert(ts);
+	ts->n_tasks = ntasks;
+	ts->running = bit_realloc (ts->running, ntasks);
+	ts->start_failed = bit_realloc (ts->start_failed, ntasks);
+	ts->normal_exit = bit_realloc (ts->normal_exit, ntasks);
+	ts->abnormal_exit = bit_realloc (ts->abnormal_exit, ntasks);
 }
 
 void task_state_destroy (task_state_t ts)

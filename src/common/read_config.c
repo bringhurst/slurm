@@ -5,6 +5,7 @@
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Portions Copyright (C) 2008 Vijay Ramasubramanian.
  *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions (boards) copyright (C) 2012 Bull, <rod.schultz@bull.com>
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
@@ -113,6 +114,7 @@ typedef struct names_ll_s {
 	char *address;	/* NodeAddr */
 	uint16_t port;
 	uint16_t cpus;
+	uint16_t boards;
 	uint16_t sockets;
 	uint16_t cores;
 	uint16_t threads;
@@ -500,6 +502,7 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 	slurm_conf_node_t *n;
 	int computed_procs;
 	static s_p_options_t _nodename_options[] = {
+		{"Boards", S_P_UINT16},
 		{"CoresPerSocket", S_P_UINT16},
 		{"CPUs", S_P_UINT16},
 		{"Feature", S_P_STRING},
@@ -511,6 +514,7 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 		{"RealMemory", S_P_UINT32},
 		{"Reason", S_P_STRING},
 		{"Sockets", S_P_UINT16},
+		{"SocketsPerBoard", S_P_UINT16},
 		{"State", S_P_STRING},
 		{"ThreadsPerCore", S_P_UINT16},
 		{"TmpDisk", S_P_UINT32},
@@ -547,9 +551,12 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 		return 0;
 	} else {
 		bool no_cpus    = false;
+		bool no_boards  = false;
 		bool no_sockets = false;
 		bool no_cores   = false;
 		bool no_threads = false;
+		bool no_sockets_per_board = false;
+		uint16_t sockets_per_board = 0;
 
 		n = xmalloc(sizeof(slurm_conf_node_t));
 		dflt = default_nodename_tbl;
@@ -564,6 +571,12 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 			n->hostnames = xstrdup(n->nodenames);
 		if (!s_p_get_string(&n->addresses, "NodeAddr", tbl))
 			n->addresses = xstrdup(n->hostnames);
+
+		if (!s_p_get_uint16(&n->boards, "Boards", tbl)
+		    && !s_p_get_uint16(&n->boards, "Boards", dflt)) {
+			n->boards = 1;
+			no_boards = true;
+		}
 
 		if (!s_p_get_uint16(&n->cores, "CoresPerSocket", tbl)
 		    && !s_p_get_uint16(&n->cores, "CoresPerSocket", dflt)) {
@@ -605,6 +618,13 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 			no_sockets = true;
 		}
 
+		if (!s_p_get_uint16(&sockets_per_board, "SocketsPerBoard", tbl)
+		    && !s_p_get_uint16(&sockets_per_board, "SocketsPerBoard",
+				       dflt)) {
+			sockets_per_board = 1;
+			no_sockets_per_board = true;
+		}
+
 		if (!s_p_get_string(&n->state, "State", tbl)
 		    && !s_p_get_string(&n->state, "State", dflt))
 			n->state = NULL;
@@ -636,43 +656,101 @@ static int _parse_nodename(void **dest, slurm_parser_enum_t type,
 			n->threads = 1;
 		}
 
-		if (!no_cpus    &&	/* infer missing Sockets= */
-		    no_sockets) {
-			n->sockets = n->cpus / (n->cores * n->threads);
-		}
-
-		if (n->sockets == 0) {	/* make sure sockets is non-zero */
-			error("NodeNames=%s Sockets=0 is invalid, "
+		if (!no_sockets_per_board && sockets_per_board==0) {
+			/* make sure sockets_per_boards is non-zero */
+			error("NodeNames=%s SocketsPerBoards=0 is invalid, "
 			      "reset to 1", n->nodenames);
-			n->sockets = 1;
+			sockets_per_board = 1;
 		}
 
-		if (no_cpus) {		/* infer missing CPUs= */
-			n->cpus = n->sockets * n->cores * n->threads;
-		}
-
-		/* if only CPUs= and Sockets= specified check for match */
-		if (!no_cpus    &&
-		    !no_sockets &&
-		    no_cores    &&
-		    no_threads) {
-			if (n->cpus != n->sockets) {
+		if (no_boards) {
+			/* This case is exactly like if was without boards,
+			 * Except SocketsPerBoard=# can be used,
+			 * But it can't be used with Sockets=# */
+			n->boards = 1;
+			if (!no_sockets && !no_sockets_per_board) {
+				error("NodeNames=%s Sockets=# and "
+				      "SocketsPerBoard=# is invalid"
+				      ", using SocketsPerBoard",
+				      n->nodenames);
+				n->sockets = sockets_per_board;
+			}
+			if (!no_sockets_per_board) {
+				n->sockets = sockets_per_board;
+			}
+			if (!no_cpus    &&	/* infer missing Sockets= */
+			    no_sockets) {
+				n->sockets = n->cpus / (n->cores * n->threads);
+			}
+			if (n->sockets == 0) { /* make sure sockets != 0 */
+				error("NodeNames=%s Sockets=0 is invalid, "
+				      "reset to 1", n->nodenames);
+				n->sockets = 1;
+			}
+			if (no_cpus) {		/* infer missing CPUs= */
+				n->cpus = n->sockets * n->cores * n->threads;
+			}
+			/* if only CPUs= and Sockets=
+			 * specified check for match */
+			if (!no_cpus    && !no_sockets &&
+			     no_cores   &&  no_threads &&
+			     (n->cpus != n->sockets)) {
 				n->sockets = n->cpus;
 				error("NodeNames=%s CPUs doesn't match "
 				      "Sockets, setting Sockets to %d",
 				      n->nodenames, n->sockets);
 			}
-		}
-
-		computed_procs = n->sockets * n->cores * n->threads;
-		if ((n->cpus != n->sockets) &&
-		    (n->cpus != n->sockets * n->cores) &&
-		    (n->cpus != computed_procs)) {
-			error("NodeNames=%s CPUs=%d doesn't match "
-			      "Sockets*CoresPerSocket*ThreadsPerCore (%d), "
-			      "resetting CPUs",
-			      n->nodenames, n->cpus, computed_procs);
-			n->cpus = computed_procs;
+			computed_procs = n->sockets * n->cores * n->threads;
+			if ((n->cpus != n->sockets) &&
+			    (n->cpus != n->sockets * n->cores) &&
+			    (n->cpus != computed_procs)) {
+				error("NodeNames=%s CPUs=%d doesn't match "
+				      "Sockets*CoresPerSocket*ThreadsPerCore "
+				      "(%d), resetting CPUs",
+				      n->nodenames, n->cpus, computed_procs);
+				n->cpus = computed_procs;
+			}
+		} else {
+			/* In this case Boards=# is used.
+			 * CPUs=# or Procs=# are ignored.
+			 */
+			if (!no_cpus) {
+				error("NodeNames=%s CPUs=# or Procs=# "
+				      "with Boards=# is invalid and "
+				      "is ignored.", n->nodenames);
+			}
+			if (n->boards == 0) {
+				/* make sure boards is non-zero */
+				error("NodeNames=%s Boards=0 is "
+				      "invalid, reset to 1",
+				      n->nodenames);
+				n->boards = 1;
+			}
+			if (!no_sockets && !no_sockets_per_board) {
+				error("NodeNames=%s Sockets=# and "
+				      "SocketsPerBoard=# is invalid, "
+				      "using SocketsPerBoard", n->nodenames);
+				n->sockets = n->boards * sockets_per_board;
+			} else if (!no_sockets_per_board) {
+				n->sockets = n->boards * sockets_per_board;
+			} else if (!no_sockets) {
+				error("NodeNames=%s Sockets=# with Boards=# is"
+				      " not recommended, assume "
+				      "SocketsPerBoard was meant",
+				      n->nodenames);
+				if (n->sockets == 0) {
+					/* make sure sockets is non-zero */
+					error("NodeNames=%s Sockets=0 is "
+					      "invalid, reset to 1",
+					      n->nodenames);
+					n->sockets = 1;
+				}
+				n->sockets = n->boards * n->sockets;
+			} else {
+				n->sockets = n->boards;
+			}
+			/* Node boards factored into sockets */
+			n->cpus = n->sockets * n->cores * n->threads;
 		}
 
 		*dest = (void *)n;
@@ -1186,8 +1264,9 @@ static int _get_hash_idx(const char *name)
 
 static void _push_to_hashtbls(char *alias, char *hostname,
 			      char *address, uint16_t port,
-			      uint16_t cpus, uint16_t sockets,
-			      uint16_t cores, uint16_t threads)
+			      uint16_t cpus, uint16_t boards,
+			      uint16_t sockets, uint16_t cores,
+			      uint16_t threads, bool front_end)
 {
 	int hostname_idx, alias_idx;
 	names_ll_t *p, *new;
@@ -1211,6 +1290,10 @@ static void _push_to_hashtbls(char *alias, char *hostname,
 	p = node_to_host_hashtbl[alias_idx];
 	while (p) {
 		if (strcmp(p->alias, alias)==0) {
+			if (front_end)
+				fatal("Frontend not configured correctly "
+				      "in slurm.conf.  See man slurm.conf "
+				      "look for frontendname.");
 			fatal("Duplicated NodeName %s in the config file",
 			      p->alias);
 			return;
@@ -1225,6 +1308,7 @@ static void _push_to_hashtbls(char *alias, char *hostname,
 	new->address	= xstrdup(address);
 	new->port	= port;
 	new->cpus	= cpus;
+	new->boards	= boards;
 	new->sockets	= sockets;
 	new->cores	= cores;
 	new->threads	= threads;
@@ -1268,7 +1352,7 @@ static int _register_conf_node_aliases(slurm_conf_node_t *node_ptr)
 	char *hostname = NULL;
 	char *port_str = NULL;
 	int error_code = SLURM_SUCCESS;
-	int address_count, alias_count, hostname_count, port_count;
+	int address_count, alias_count, hostname_count, port_count, port_int;
 	uint16_t port = 0;
 
 	if ((node_ptr->nodenames == NULL) || (node_ptr->nodenames[0] == '\0'))
@@ -1343,12 +1427,12 @@ static int _register_conf_node_aliases(slurm_conf_node_t *node_ptr)
 		error("At least as many NodeAddr are required as NodeName");
 		goto cleanup;
 	}
-#endif	/* MULTIPLE_SLURMD */
 	if (hostname_count < alias_count) {
 		error("At least as many NodeHostname are required "
 		      "as NodeName");
 		goto cleanup;
 	}
+#endif	/* MULTIPLE_SLURMD */
 #endif	/* HAVE_FRONT_END */
 	if ((port_count != alias_count) && (port_count > 1)) {
 		error("Port count must equal that of NodeName "
@@ -1358,12 +1442,22 @@ static int _register_conf_node_aliases(slurm_conf_node_t *node_ptr)
 
 	/* now build the individual node structures */
 	while ((alias = hostlist_shift(alias_list))) {
-		if ((address_count > 1)  || (address == NULL))
+		if (address_count > 0) {
+			address_count--;
+			if (address)
+				free(address);
 			address = hostlist_shift(address_list);
-		if ((hostname_count > 1) || (hostname == NULL))
+		}
+		if (hostname_count > 0) {
+			hostname_count--;
+			if (hostname)
+				free(hostname);
 			hostname = hostlist_shift(hostname_list);
-		if ((port_count > 1) && (port_str == NULL)) {
-			int port_int;
+		}
+		if (port_count > 0) {
+			port_count--;
+			if (port_str)
+				free(port_str);
 			port_str = hostlist_shift(port_list);
 			port_int = atoi(port_str);
 			if ((port_int <= 0) || (port_int > 0xffff))
@@ -1371,24 +1465,10 @@ static int _register_conf_node_aliases(slurm_conf_node_t *node_ptr)
 			port = port_int;
 		}
 		_push_to_hashtbls(alias, hostname, address, port,
-				  node_ptr->cpus, node_ptr->sockets,
-				  node_ptr->cores, node_ptr->threads);
+				  node_ptr->cpus, node_ptr->boards,
+				  node_ptr->sockets, node_ptr->cores,
+				  node_ptr->threads, 0);
 		free(alias);
-		if (address_count > 1) {
-			address_count--;
-			free(address);
-			address = NULL;
-		}
-		if (hostname_count > 1) {
-			hostname_count--;
-			free(hostname);
-			hostname = NULL;
-		}
-		if (port_count > 1) {
-			port_count--;
-			free(port_str);
-			port_str = NULL;
-		}
 	}
 	if (address)
 		free(address);
@@ -1446,7 +1526,7 @@ static int _register_front_ends(slurm_conf_frontend_t *front_end_ptr)
 		address = hostlist_shift(address_list);
 
 		_push_to_hashtbls(hostname, hostname, address,
-				  front_end_ptr->port, 1, 1, 1, 1);
+				  front_end_ptr->port, 1, 1, 1, 1, 1, 1);
 		free(hostname);
 		free(address);
 	}
@@ -1656,15 +1736,20 @@ extern char *slurm_conf_get_nodename_from_addr(const char *node_addr)
 		return NULL;
 	}
 
-	start_name = xstrdup(hptr->h_name);
-	dot_ptr = strchr(start_name, '.');
-	if (dot_ptr == NULL)
-		dot_ptr = start_name + strlen(start_name);
-	else
-		dot_ptr[0] = '\0';
+	if (!strcmp(hptr->h_name, "localhost")) {
+		start_name = xshort_hostname();
+	} else {
+		start_name = xstrdup(hptr->h_name);
+		dot_ptr = strchr(start_name, '.');
+		if (dot_ptr == NULL)
+			dot_ptr = start_name + strlen(start_name);
+		else
+			dot_ptr[0] = '\0';
+	}
 
 	ret_name = slurm_conf_get_aliases(start_name);
 	xfree(start_name);
+
 	return ret_name;
 }
 
@@ -1822,13 +1907,15 @@ extern int slurm_conf_get_addr(const char *node_name, slurm_addr_t *address)
 }
 
 /*
- * slurm_conf_get_cpus_sct -
- * Return the cpus, sockets, cores, and threads for a given NodeName
+ * slurm_conf_get_cpus_bsct -
+ * Return the cpus, boards, sockets, cores, and threads configured for a
+ * given NodeName
  * Returns SLURM_SUCCESS on success, SLURM_FAILURE on failure.
  */
-extern int slurm_conf_get_cpus_sct(const char *node_name,
-				   uint16_t *cpus, uint16_t *sockets,
-				   uint16_t *cores, uint16_t *threads)
+extern int slurm_conf_get_cpus_bsct(const char *node_name,
+				    uint16_t *cpus, uint16_t *boards,
+				    uint16_t *sockets, uint16_t *cores,
+				    uint16_t *threads)
 {
 	int idx;
 	names_ll_t *p;
@@ -1842,6 +1929,8 @@ extern int slurm_conf_get_cpus_sct(const char *node_name,
 		if (strcmp(p->alias, node_name) == 0) {
 		    	if (cpus)
 				*cpus    = p->cpus;
+			if (boards)
+				*boards  = p->boards;
 			if (sockets)
 				*sockets = p->sockets;
 			if (cores)
@@ -2201,9 +2290,9 @@ static void _init_slurm_conf(const char *file_name)
 		if (name == NULL)
 			name = default_slurm_config_file;
 	}
-       	if (conf_initialized) {
+	if (conf_initialized)
 		error("the conf_hashtbl is already inited");
-	}
+	debug("Reading slurm.conf file: %s", name);
 	conf_hashtbl = s_p_hashtbl_create(slurm_conf_options);
 	conf_ptr->last_update = time(NULL);
 
@@ -2211,7 +2300,7 @@ static void _init_slurm_conf(const char *file_name)
 	conf_ptr->hash_val = 0;
 	if ((_config_is_storage(conf_hashtbl, name) < 0) &&
 	    (s_p_parse_file(conf_hashtbl, &conf_ptr->hash_val, name, false)
- 	     == SLURM_ERROR)) {
+	     == SLURM_ERROR)) {
 		fatal("something wrong with opening/reading conf file");
 	}
 	/* s_p_dump_values(conf_hashtbl, slurm_conf_options); */
@@ -2551,16 +2640,16 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 	s_p_get_string(&conf->gres_plugins, "GresTypes", hashtbl);
 
 	if (s_p_get_uint16(&conf->inactive_limit, "InactiveLimit", hashtbl)) {
-#ifdef HAVE_BG
-		/* Inactive limit must be zero on Blue Gene */
+#ifdef HAVE_BG_L_P
+		/* Inactive limit must be zero on BlueGene L/P */
 		if (conf->inactive_limit) {
-			error("InactiveLimit=%d is invalid on Blue Gene",
+			error("InactiveLimit=%d is invalid on BlueGene L/P",
 			      conf->inactive_limit);
 		}
 		conf->inactive_limit = 0;
 #endif
 	} else {
-#ifdef HAVE_BG
+#ifdef HAVE_BG_L_P
 		conf->inactive_limit = 0;
 #endif
 		conf->inactive_limit = DEFAULT_INACTIVE_LIMIT;
@@ -2736,6 +2825,15 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 				|= ACCOUNTING_ENFORCE_ASSOCS;
 			conf->accounting_storage_enforce
 				|= ACCOUNTING_ENFORCE_LIMITS;
+		}
+
+		if (strstr(temp_str, "safe")) {
+			conf->accounting_storage_enforce
+				|= ACCOUNTING_ENFORCE_ASSOCS;
+			conf->accounting_storage_enforce
+				|= ACCOUNTING_ENFORCE_LIMITS;
+			conf->accounting_storage_enforce
+				|= ACCOUNTING_ENFORCE_SAFE;
 		}
 
 		if (strstr(temp_str, "wckeys")) {
@@ -3296,6 +3394,11 @@ _validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 					fatal("Bad TaskPluginParam: %s", tok);
 				set_unit = true;
 				conf->task_plugin_param |= CPU_BIND_NONE;
+			} else if (strcasecmp(tok, "boards") == 0) {
+				if (set_unit)
+					fatal("Bad TaskPluginParam: %s", tok);
+				set_unit = true;
+				conf->task_plugin_param |= CPU_BIND_TO_BOARDS;
 			} else if (strcasecmp(tok, "sockets") == 0) {
 				if (set_unit)
 					fatal("Bad TaskPluginParam: %s", tok);
@@ -3582,6 +3685,11 @@ extern char * reconfig_flags2str(uint16_t reconfig_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "KeepPartInfo");
 	}
+	if (reconfig_flags & RECONFIG_KEEP_PART_STAT) {
+		if (rc)
+			xstrcat(rc, ",");
+		xstrcat(rc, "KeepPartState");
+	}
 
 	return rc;
 }
@@ -3604,6 +3712,8 @@ extern uint16_t reconfig_str2flags(char *reconfig_flags)
 	while (tok) {
 		if (strcasecmp(tok, "KeepPartInfo") == 0)
 			rc |= RECONFIG_KEEP_PART_INFO;
+		else if (strcasecmp(tok, "KeepPartState") == 0)
+			rc |= RECONFIG_KEEP_PART_STAT;
 		else {
 			error("Invalid ReconfigFlag: %s", tok);
 			rc = (uint16_t) NO_VAL;

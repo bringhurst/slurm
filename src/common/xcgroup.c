@@ -54,6 +54,7 @@
 #include <string.h>
 #include <strings.h>
 #include <dirent.h>
+#include <sys/mount.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -94,16 +95,36 @@ int _file_write_content(char* file_path, char* content, size_t csize);
  *  - XCGROUP_SUCCESS
  */
 int xcgroup_ns_create(slurm_cgroup_conf_t *conf,
-		xcgroup_ns_t* cgns, char* mnt_point, char* mnt_args,
-		      char* subsys, char* notify_prog) {
+		      xcgroup_ns_t *cgns, char *mnt_args, char *subsys) {
 
-	cgns->mnt_point = xstrdup(conf->cgroup_mountpoint);
-	xstrcat(cgns->mnt_point, mnt_point);
-
+	cgns->mnt_point = xstrdup_printf("%s/%s",
+					 conf->cgroup_mountpoint, subsys);
 	cgns->mnt_args = xstrdup(mnt_args);
 	cgns->subsystems = xstrdup(subsys);
-	cgns->notify_prog = xstrdup(notify_prog);
+	cgns->notify_prog = xstrdup_printf("%s/release_%s",
+					   conf->cgroup_release_agent, subsys);
+
+	/* check that freezer cgroup namespace is available */
+	if (!xcgroup_ns_is_available(cgns)) {
+		if (conf->cgroup_automount) {
+			if (xcgroup_ns_mount(cgns)) {
+				error("unable to mount %s cgroup "
+				      "namespace: %s",
+				      subsys, slurm_strerror(errno));
+				goto clean;
+			}
+			info("cgroup namespace '%s' is now mounted", subsys);
+		} else {
+			error("cgroup namespace '%s' not mounted. aborting",
+			      subsys);
+			goto clean;
+		}
+	}
+
 	return XCGROUP_SUCCESS;
+clean:
+	xcgroup_ns_destroy(cgns);
+	return XCGROUP_ERROR;
 }
 
 /*
@@ -113,8 +134,8 @@ int xcgroup_ns_create(slurm_cgroup_conf_t *conf,
  *  - XCGROUP_ERROR
  *  - XCGROUP_SUCCESS
  */
-int xcgroup_ns_destroy(xcgroup_ns_t* cgns) {
-
+int xcgroup_ns_destroy(xcgroup_ns_t* cgns)
+{
 	xfree(cgns->mnt_point);
 	xfree(cgns->mnt_args);
 	xfree(cgns->subsystems);
@@ -129,12 +150,14 @@ int xcgroup_ns_destroy(xcgroup_ns_t* cgns) {
  * returned values:
  *  - XCGROUP_ERROR
  *  - XCGROUP_SUCCESS
+ *
+ * If an error occurs, errno will be set.
  */
 int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 {
 	int fstatus;
-	char* mount_cmd_fmt;
-	char mount_cmd[1024];
+	char* options;
+	char opt_combined[1024];
 
 	char* mnt_point;
 	char* p;
@@ -159,8 +182,8 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 		p = mnt_point;
 		while ((p = index(p+1, '/')) != NULL) {
 			*p = '\0';
-			mkdir(mnt_point, 0755);
-			if (errno != EEXIST) {
+			fstatus = mkdir(mnt_point, 0755);
+			if (fstatus && errno != EEXIST) {
 				debug("unable to create cgroup ns required "
 				      "directory '%s'", mnt_point);
 				xfree(mnt_point);
@@ -182,23 +205,27 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 	umask(omask);
 
 	if (cgns->mnt_args == NULL ||
-	     strlen(cgns->mnt_args) == 0) {
-		mount_cmd_fmt = "/bin/mount -o %s%s -t cgroup none %s";
+	    strlen(cgns->mnt_args) == 0)
+		options = cgns->subsystems;
+	else {
+		if (snprintf(opt_combined, sizeof(opt_combined), "%s,%s",
+			     cgns->subsystems, cgns->mnt_args)
+		    >= sizeof(opt_combined)) {
+			debug2("unable to build cgroup options string");
+			return XCGROUP_ERROR;
+		}
+		options = opt_combined;
 	}
-	else
-		mount_cmd_fmt = "/bin/mount -o %s, %s -t cgroup none %s";
 
-	if (snprintf(mount_cmd, 1024, mount_cmd_fmt, cgns->subsystems,
-		      cgns->mnt_args, cgns->mnt_point) >= 1024) {
-		debug2("unable to build cgroup ns mount cmd line");
-		return XCGROUP_ERROR;
-	}
-	else
-		debug3("cgroup mount cmd line is '%s'", mount_cmd);
-
-	if (system(mount_cmd))
+	if (mount("cgroup", cgns->mnt_point, "cgroup",
+		  MS_NOSUID|MS_NOEXEC|MS_NODEV, options))
 		return XCGROUP_ERROR;
 	else {
+		/* FIXME: this only gets set when we aren't mounted at
+		   all.  Since we never umount this may only be loaded
+		   at startup the first time.
+		*/
+
 		/* we then set the release_agent if necessary */
 		if (cgns->notify_prog) {
 			if (xcgroup_create(cgns, &cg, "/", 0, 0) ==
@@ -206,6 +233,7 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
 				return XCGROUP_SUCCESS;
 			xcgroup_set_param(&cg, "release_agent",
 					  cgns->notify_prog);
+			xcgroup_destroy(&cg);
 		}
 		return XCGROUP_SUCCESS;
 	}
@@ -217,26 +245,14 @@ int xcgroup_ns_mount(xcgroup_ns_t* cgns)
  * returned values:
  *  - XCGROUP_ERROR
  *  - XCGROUP_SUCCESS
+ *
+ * If an error occurs, errno will be set.
  */
 int xcgroup_ns_umount(xcgroup_ns_t* cgns)
 {
-	char* umount_cmd_fmt;
-	char umount_cmd[1024];
-
-	umount_cmd_fmt = "/bin/umount %s";
-
-	if (snprintf(umount_cmd, 1024, umount_cmd_fmt,
-		      cgns->mnt_point) >= 1024) {
-		debug2("unable to build cgroup ns umount cmd line");
+	if (umount(cgns->mnt_point))
 		return XCGROUP_ERROR;
-	}
-	else
-		debug3("cgroup ns umount cmd line is '%s'", umount_cmd);
-
-	if (system(umount_cmd))
-		return XCGROUP_ERROR;
-	else
-		return XCGROUP_SUCCESS;
+	return XCGROUP_SUCCESS;
 }
 
 /*
@@ -248,16 +264,15 @@ int xcgroup_ns_umount(xcgroup_ns_t* cgns)
  */
 int xcgroup_ns_is_available(xcgroup_ns_t* cgns)
 {
-	int fstatus;
+	int fstatus = 0;
 	char* value;
 	size_t s;
 	xcgroup_t cg;
 
 	if (xcgroup_create(cgns, &cg, "/", 0, 0) == XCGROUP_ERROR)
 		return 0;
-
 	if (xcgroup_get_param(&cg, "release_agent",
-			       &value, &s) != XCGROUP_SUCCESS)
+			      &value, &s) != XCGROUP_SUCCESS)
 		fstatus = 0;
 	else {
 		xfree(value);
@@ -366,6 +381,7 @@ int xcgroup_create(xcgroup_ns_t* cgns, xcgroup_t* cg,
 	cg->path = xstrdup(file_path);
 	cg->uid = uid;
 	cg->gid = gid;
+	cg->notify = 1;
 
 	return XCGROUP_SUCCESS;
 }
@@ -427,7 +443,7 @@ int xcgroup_instanciate(xcgroup_t* cg)
 	uid_t uid;
 	gid_t gid;
 	int create_only;
-	int notify;
+	uint32_t notify;
 
 	/* init variables based on input cgroup */
 	cgns = cg->ns;
@@ -435,7 +451,7 @@ int xcgroup_instanciate(xcgroup_t* cg)
 	uid = cg->uid;
 	gid = cg->gid;
 	create_only=0;
-	notify=1;
+	notify = cg->notify;
 
 	/* save current mask and apply working one */
 	cmask = S_IWGRP | S_IWOTH;
@@ -464,7 +480,7 @@ int xcgroup_instanciate(xcgroup_t* cg)
 	fstatus = XCGROUP_SUCCESS;
 
 	/* set notify on release flag */
-	if (notify && cgns->notify_prog)
+	if (notify == 1 && cgns->notify_prog)
 		xcgroup_set_params(cg, "notify_on_release=1");
 	else
 		xcgroup_set_params(cg, "notify_on_release=0");
@@ -499,6 +515,9 @@ int xcgroup_load(xcgroup_ns_t* cgns, xcgroup_t* cg, char* uri)
 	cg->uid = buf.st_uid;
 	cg->gid = buf.st_gid;
 
+	/* read the content of the notify flag */
+	xcgroup_get_uint32_param(cg,"notify_on_release",&(cg->notify));
+
 	return XCGROUP_SUCCESS;
 }
 
@@ -510,43 +529,71 @@ int xcgroup_delete(xcgroup_t* cg)
 		return XCGROUP_SUCCESS;
 }
 
+static int cgroup_procs_readable (xcgroup_t *cg)
+{
+	struct stat st;
+	char *path = NULL;
+	int rc = 0;
+
+	xstrfmtcat (path, "%s/%s", cg->path, "cgroup.procs");
+	if ((stat (path, &st) >= 0) && (st.st_mode & S_IRUSR))
+		rc = 1;
+	xfree (path);
+	return (rc);
+}
+
+static int cgroup_procs_writable (xcgroup_t *cg)
+{
+	struct stat st;
+	char *path = NULL;
+	int rc = 0;
+
+	xstrfmtcat (path, "%s/%s", cg->path, "cgroup.procs");
+	if ((stat (path, &st) >= 0) && (st.st_mode & S_IWUSR))
+		rc = 1;
+	xfree (path);
+	return (rc);
+}
+
+// This call is not intended to be used to move thread pids
 int xcgroup_add_pids(xcgroup_t* cg, pid_t* pids, int npids)
 {
 	int fstatus = XCGROUP_ERROR;
-	char* cpath = cg->path;
-	char file_path[PATH_MAX];
-
-	if (snprintf(file_path, PATH_MAX, "%s/tasks",
-		      cpath) >= PATH_MAX) {
-		debug2("unable to add pids to '%s' : %m", cpath);
-		return fstatus;
-	}
-
-	fstatus = _file_write_uint32s(file_path, (uint32_t*)pids, npids);
+	char* path = NULL;
+	
+	// If possible use cgroup.procs to add the processes atomically
+	if (cgroup_procs_writable (cg))
+		xstrfmtcat (path, "%s/%s", cg->path, "cgroup.procs");
+	else
+		xstrfmtcat (path, "%s/%s", cg->path, "tasks");
+	
+	fstatus = _file_write_uint32s(path, (uint32_t*)pids, npids);
 	if (fstatus != XCGROUP_SUCCESS)
-		debug2("unable to add pids to '%s'", cpath);
+		debug2("unable to add pids to '%s'", cg->path);
+
+	xfree(path);
 	return fstatus;
 }
 
-int
-xcgroup_get_pids(xcgroup_t* cg, pid_t **pids, int *npids)
+// This call is not intended to be used to get thread pids
+int xcgroup_get_pids(xcgroup_t* cg, pid_t **pids, int *npids)
 {
 	int fstatus = XCGROUP_ERROR;
-	char* cpath = cg->path;
-	char file_path[PATH_MAX];
-
+	char* path = NULL;
+	
 	if (pids == NULL || npids == NULL)
 		return SLURM_ERROR;
-
-	if (snprintf(file_path, PATH_MAX, "%s/tasks",
-		      cpath) >= PATH_MAX) {
-		debug2("unable to get pids of '%s' : %m", cpath);
-		return fstatus;
-	}
-
-	fstatus = _file_read_uint32s(file_path, (uint32_t**)pids, npids);
+	
+	if (cgroup_procs_readable (cg))
+		xstrfmtcat (path, "%s/%s", cg->path, "cgroup.procs");
+	else
+		xstrfmtcat (path, "%s/%s", cg->path, "tasks");
+	
+	fstatus = _file_read_uint32s(path, (uint32_t**)pids, npids);
 	if (fstatus != XCGROUP_SUCCESS)
-		debug2("unable to get pids of '%s'", cpath);
+		debug2("unable to get pids of '%s'", cg->path);
+
+	xfree(path);
 	return fstatus;
 }
 
@@ -771,19 +818,6 @@ static int cgroup_move_process_by_task (xcgroup_t *cg, pid_t pid)
 	}
 	closedir (dir);
 	return XCGROUP_SUCCESS;
-}
-
-static int cgroup_procs_writable (xcgroup_t *cg)
-{
-	struct stat st;
-	char *path = NULL;
-	int rc = 0;
-
-	xstrfmtcat (path, "%s/%s", cg->path, "cgroup.procs");
-	if ((stat (path, &st) >= 0) && (st.st_mode & S_IWUSR))
-		rc = 1;
-	xfree (path);
-	return (rc);
 }
 
 int xcgroup_move_process (xcgroup_t *cg, pid_t pid)

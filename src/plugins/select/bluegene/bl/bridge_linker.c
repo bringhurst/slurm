@@ -1687,7 +1687,7 @@ extern int bridge_block_sync_users(bg_record_t *bg_record)
 #ifdef HAVE_BG_FILES
 	char *user;
 	rm_partition_t *block_ptr = NULL;
-	int rc, i, user_count;
+	int rc, i, user_count, found=0;
 	char *user_name = NULL;
 
 	/* We can't use bridge_get_block_info here because users are
@@ -1753,18 +1753,19 @@ extern int bridge_block_sync_users(bg_record_t *bg_record)
 			continue;
 		}
 
-		if (!strcmp(user, bg_conf->slurm_user_name)) {
-			free(user);
-			continue;
-		}
+		/* It has been found on L the block owner is not
+		   needed as a regular user so we are now removing
+		   it.  It is unknown if this is the case for P but we
+		   believe it is.  If a problem does arise on P please
+		   report and just uncomment this check.
+		*/
+		/* if (!strcmp(user, bg_conf->slurm_user_name)) { */
+		/* 	free(user); */
+		/* 	continue; */
+		/* } */
 
 		if (user_name && !strcmp(user, user_name)) {
-			returnc = REMOVE_USER_FOUND;
-			if ((rc = bridge_block_add_user(bg_record, user))
-			    != SLURM_SUCCESS) {
-				debug("couldn't add user %s to block %s",
-				      user, bg_record->bg_block_id);
-			}
+			found=1;
 			free(user);
 			continue;
 		}
@@ -1779,6 +1780,17 @@ extern int bridge_block_sync_users(bg_record_t *bg_record)
 		}
 		free(user);
 	}
+
+	// no users currently, or we didn't find outselves in the lookup
+	if (!found && user_name) {
+		returnc = REMOVE_USER_FOUND;
+		if ((rc = bridge_block_add_user(bg_record, user_name))
+		    != SLURM_SUCCESS) {
+			debug("couldn't add user %s to block %s",
+			      user, bg_record->bg_block_id);
+		}
+	}
+
 	if ((rc = bridge_free_block(block_ptr)) != SLURM_SUCCESS) {
 		error("bridge_free_block(): %s", bg_err_str(rc));
 	}
@@ -1944,6 +1956,20 @@ extern void bridge_block_post_job(char *bg_block_id, struct job_record *job_ptr)
 	jobs = 1;
 #endif
 	_remove_jobs_on_block_and_reset(job_list, jobs,	bg_block_id);
+	if (job_ptr) {
+		slurmctld_lock_t job_read_lock =
+			{ NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
+		lock_slurmctld(job_read_lock);
+		if (job_ptr->magic == JOB_MAGIC) {
+			/* This signals the job purger that the job
+			   actually finished in the system.
+			*/
+			select_jobinfo_t *jobinfo =
+				job_ptr->select_jobinfo->data;
+			jobinfo->bg_record = NULL;
+		}
+		unlock_slurmctld(job_read_lock);
+	}
 
 #if defined HAVE_BG_FILES
 	if ((rc = _free_job_list(job_list)) != SLURM_SUCCESS)
@@ -1975,6 +2001,16 @@ extern status_t bridge_free_bg(my_bluegene_t *bg)
 	slurm_mutex_unlock(&api_file_mutex);
 	return rc;
 
+}
+
+extern uint16_t bridge_block_get_action(char *bg_block_id)
+{
+	return BG_BLOCK_ACTION_NONE;
+}
+
+extern int bridge_check_nodeboards(char *mp_loc)
+{
+	return 0;
 }
 
 extern int bridge_set_log_params(char *api_file_name, unsigned int level)

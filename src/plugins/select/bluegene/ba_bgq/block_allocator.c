@@ -89,7 +89,8 @@ static int _check_deny_pass(int dim);
 
 /* */
 static int _fill_in_wires(List mps, ba_mp_t *start_mp, int dim,
-			  uint16_t geometry, uint16_t conn_type);
+			  uint16_t geometry, uint16_t conn_type,
+			  bool full_check);
 
 /* */
 static void _setup_next_mps(int level, uint16_t *coords);
@@ -841,19 +842,23 @@ extern char *set_bg_block(List results, select_ba_request_t* ba_request)
 			list_append(main_mps, ba_mp);
 		}
 		/* If we are going to take up the entire dimension
-		   might as well force it to be TORUS.
+		   might as well force it to be TORUS.  Check against
+		   MESH here instead of !TORUS so we don't mess up
+		   small block allocations.
 		*/
 		for (dim=0; dim<cluster_dims; dim++) {
-			if ((ba_request->conn_type[dim] != SELECT_TORUS)
-			    && (ba_geo_table->geometry[dim] == 1)) {
+			if (((ba_request->conn_type[dim] == SELECT_MESH)
+			      || (ba_request->conn_type[dim] == SELECT_NAV))
+			     && ((ba_geo_table->geometry[dim] == 1)
+				 || (ba_geo_table->geometry[dim]
+				     == DIM_SIZE[dim]))) {
 				/* On a Q all single midplane blocks
-				 * must be a TORUS. */
-				ba_request->conn_type[dim] = SELECT_TORUS;
-			} else if ((ba_request->conn_type[dim] != SELECT_TORUS)
-				   && (ba_geo_table->geometry[dim]
-				       == DIM_SIZE[dim])) {
-				/* Might as well make it a torus since
-				   we are using all the nodes. */
+				 * must be a TORUS.
+				 *
+				 * Also if we are using all midplanes
+				 * in a dimension might as well make
+				 * it a torus.
+				 */
 				ba_request->conn_type[dim] = SELECT_TORUS;
 			} else if (ba_request->conn_type[dim] == SELECT_NAV) {
 				/* Set everything else to the default */
@@ -873,7 +878,8 @@ extern char *set_bg_block(List results, select_ba_request_t* ba_request)
 				if (!_fill_in_wires(
 					    main_mps, ba_mp, dim,
 					    ba_geo_table->geometry[dim],
-					    ba_request->conn_type[dim])) {
+					    ba_request->conn_type[dim],
+					    ba_request->full_check)) {
 					list_iterator_destroy(itr);
 					memcpy(ba_request->conn_type,
 					       orig_conn_type,
@@ -1557,6 +1563,12 @@ extern struct job_record *ba_remove_job_in_block_job_list(
 		 */
 		bad_magic = 1;
 		used_cnodes = bit_copy(ba_mp->cnode_bitmap);
+		/* Take out the part (if any) of the midplane that
+		   isn't part of the block.
+		*/
+		bit_not(ba_mp->cnode_usable_bitmap);
+		bit_and(used_cnodes, ba_mp->cnode_usable_bitmap);
+		bit_not(ba_mp->cnode_usable_bitmap);
 	}
 again:
 	itr = list_iterator_create(bg_record->job_list);
@@ -1627,8 +1639,10 @@ again:
 	}
 
 	if (bad_magic) {
-		num_unused_cpus +=
-			bit_set_count(used_cnodes) * bg_conf->cpu_ratio;
+		uint32_t current_cnode_cnt = bit_set_count(used_cnodes);
+
+		num_unused_cpus += current_cnode_cnt * bg_conf->cpu_ratio;
+
 		bit_not(used_cnodes);
 		bit_and(ba_mp->cnode_bitmap, used_cnodes);
 		bit_not(used_cnodes);
@@ -1636,8 +1650,7 @@ again:
 			debug("ba_remove_job_in_block_job_list: "
 			      "Removing old sub-block job using %d cnodes "
 			      "from block %s",
-			      bit_set_count(used_cnodes),
-			      bg_record->bg_block_id);
+			      current_cnode_cnt, bg_record->bg_block_id);
 		}
 	} else {
 		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE) {
@@ -1888,7 +1901,8 @@ static int _check_deny_pass(int dim)
 }
 
 static int _fill_in_wires(List mps, ba_mp_t *start_mp, int dim,
-			  uint16_t geometry, uint16_t conn_type)
+			  uint16_t geometry, uint16_t conn_type,
+			  bool full_check)
 {
 	ba_mp_t *curr_mp = start_mp->next_mp[dim];
 	ba_switch_t *axis_switch = NULL;
@@ -1972,6 +1986,19 @@ static int _fill_in_wires(List mps, ba_mp_t *start_mp, int dim,
 			}
 		} else if (!_mp_out_used(curr_mp, dim)
 			   && !_check_deny_pass(dim)) {
+
+			if (!full_check
+			    && bridge_check_nodeboards(curr_mp->loc)) {
+				if (ba_debug_flags
+				    & DEBUG_FLAG_BG_ALGO_DEEP) {
+					info("_fill_in_wires: can't "
+					     "use mp %s(%d) "
+					     "as passthrough it has "
+					     "nodeboards not available",
+					     curr_mp->coord_str, dim);
+				}
+				return 0;
+			}
 			if (!(curr_mp->used & BA_MP_USED_ALTERED)) {
 				add = 1;
 				curr_mp->used |= BA_MP_USED_ALTERED_PASS;

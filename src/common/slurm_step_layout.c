@@ -99,11 +99,11 @@ slurm_step_layout_t *slurm_step_layout_create(
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
 	step_layout->task_dist = task_dist;
-	if(task_dist == SLURM_DIST_ARBITRARY) {
+	if (task_dist == SLURM_DIST_ARBITRARY) {
 		hostlist_t hl = NULL;
 		char *buf = NULL;
 		/* set the node list for the task layout later if user
-		   supplied could be different that the job allocation */
+		 * supplied could be different that the job allocation */
 		arbitrary_nodes = xstrdup(tlist);
 		hl = hostlist_create(tlist);
 		hostlist_uniq(hl);
@@ -116,24 +116,23 @@ slurm_step_layout_t *slurm_step_layout_create(
 	}
 
 	step_layout->task_cnt  = num_tasks;
-	if(cluster_flags & CLUSTER_FLAG_FE) {
-		/* Limited job step support */
-		/* All jobs execute through front-end on Blue Gene.
+	if (cluster_flags & CLUSTER_FLAG_FE) {
+		/* Limited job step support on front-end systems.
+		 * All jobs execute through front-end on Blue Gene.
 		 * Normally we would not permit execution of job steps,
 		 * but can fake it by just allocating all tasks to
 		 * one of the allocated nodes. */
-		if(cluster_flags & CLUSTER_FLAG_BG)
+		if (cluster_flags & CLUSTER_FLAG_BG)
 			step_layout->node_cnt  = num_hosts;
 		else
 			step_layout->node_cnt  = 1;
 	} else
 		step_layout->node_cnt  = num_hosts;
 
-	if(_init_task_layout(step_layout, arbitrary_nodes,
-			     cpus_per_node, cpu_count_reps,
-			     cpus_per_task,
-			     task_dist, plane_size)
-	   != SLURM_SUCCESS) {
+	if (_init_task_layout(step_layout, arbitrary_nodes,
+			      cpus_per_node, cpu_count_reps,
+			      cpus_per_task,
+			      task_dist, plane_size) != SLURM_SUCCESS) {
 		slurm_step_layout_destroy(step_layout);
 		step_layout = NULL;
 	}
@@ -164,7 +163,6 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 {
 	uint32_t cpn = 1;
 	int cpu_cnt = 0, cpu_inx = 0, i, j;
-	hostlist_t hl = NULL;
 	slurm_step_layout_t *step_layout = NULL;
 
 	if ((node_cnt <= 0) || (task_cnt <= 0 && !cpus_per_node) || !tlist) {
@@ -173,11 +171,6 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 		      node_cnt, task_cnt, tlist);
 		return NULL;
 	}
-
-	hl = hostlist_create(tlist);
-	/* make out how many cpus there are on each node */
-	if (task_cnt > 0)
-		cpn = (task_cnt + node_cnt - 1) / node_cnt;
 
 	step_layout = xmalloc(sizeof(slurm_step_layout_t));
 	step_layout->node_list = xstrdup(tlist);
@@ -202,6 +195,8 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 				cpu_cnt = 0;
 			}
 		} else {
+			cpn = ((task_cnt - step_layout->task_cnt) +
+			       (node_cnt - i) - 1) / (node_cnt - i);
 			if (step_layout->task_cnt >= task_cnt) {
 				step_layout->tasks[i] = 0;
 				step_layout->tids[i] = NULL;
@@ -213,7 +208,7 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 				for (j = 0; j < cpn; j++) {
 					step_layout->tids[i][j] =
 						step_layout->task_cnt++;
-					if(step_layout->task_cnt >= task_cnt) {
+					if (step_layout->task_cnt >= task_cnt) {
 						step_layout->tasks[i] = j + 1;
 						break;
 					}
@@ -221,7 +216,7 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 			}
 		}
 	}
-	hostlist_destroy(hl);
+
 	return step_layout;
 }
 
@@ -279,23 +274,9 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 				     step_layout->tasks[i],
 				     buffer);
 		}
-	} else if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
-		if (step_layout)
-			i=1;
-
-		pack16(i, buffer);
-		if (!i)
-			return;
-		packstr(step_layout->node_list, buffer);
-		pack32(step_layout->node_cnt, buffer);
-		pack32(step_layout->task_cnt, buffer);
-		pack16(step_layout->task_dist, buffer);
-
-		for (i=0; i<step_layout->node_cnt; i++) {
-			pack32_array(step_layout->tids[i],
-				     step_layout->tasks[i],
-				     buffer);
-		}
+	} else {
+		error("pack_slurm_step_layout: protocol_version "
+		      "%hu not supported", protocol_version);
 	}
 }
 
@@ -333,30 +314,10 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer,
 					    buffer);
 			step_layout->tasks[i] = num_tids;
 		}
-	} else if (protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
-		safe_unpack16(&uint16_tmp, buffer);
-		if (!uint16_tmp)
-			return SLURM_SUCCESS;
-
-		step_layout = xmalloc(sizeof(slurm_step_layout_t));
-		*layout = step_layout;
-
-		safe_unpackstr_xmalloc(&step_layout->node_list,
-				       &uint32_tmp, buffer);
-		safe_unpack32(&step_layout->node_cnt, buffer);
-		safe_unpack32(&step_layout->task_cnt, buffer);
-		safe_unpack16(&step_layout->task_dist, buffer);
-
-		step_layout->tasks =
-			xmalloc(sizeof(uint32_t) * step_layout->node_cnt);
-		step_layout->tids = xmalloc(sizeof(uint32_t *)
-					    * step_layout->node_cnt);
-		for (i = 0; i < step_layout->node_cnt; i++) {
-			safe_unpack32_array(&(step_layout->tids[i]),
-					    &num_tids,
-					    buffer);
-			step_layout->tasks[i] = num_tids;
-		}
+	} else {
+		error("unpack_slurm_step_layout: protocol_version "
+		      "%hu not supported", protocol_version);
+		goto unpack_error;
 	}
 	return SLURM_SUCCESS;
 

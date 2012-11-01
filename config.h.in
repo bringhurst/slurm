@@ -60,6 +60,9 @@
 /* Define to 1 if have Blue Gene files */
 #undef HAVE_BG_FILES
 
+/* Define to 1 if using code where blocks have actions */
+#undef HAVE_BG_GET_ACTION
+
 /* Define to 1 if emulating or running on Blue Gene/L or P system */
 #undef HAVE_BG_L_P
 
@@ -142,7 +145,7 @@
 /* Define to 1 if you have the `job' library (-ljob). */
 #undef HAVE_LIBJOB
 
-/* define if you have libnrt. */
+/* define if you have libnrt.so */
 #undef HAVE_LIBNRT
 
 /* Define to 1 if you have the <limits.h> header file. */

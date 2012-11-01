@@ -124,7 +124,7 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 {
 	uint16_t my_state = node_ptr->node_state;
 	char *cloud_str = "", *comp_str = "", *drain_str = "", *power_str = "";
-	char tmp_line[512], time_str[32];
+	char load_str[32], tmp_line[512], time_str[32];
 	char *out = NULL, *reason_str = NULL, *select_reason_str = NULL;
 	uint16_t err_cpus = 0, alloc_cpus = 0;
 	int cpus_per_node = 1;
@@ -205,9 +205,16 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 		xstrcat(out, "\n   ");
 
 	/****** Line 2 ******/
+	if (node_ptr->cpu_load == NO_VAL)
+		strcpy(load_str, "N/A");
+	else {
+		snprintf(load_str, sizeof(load_str), "%.2f",
+			 (node_ptr->cpu_load / 100.0));
+	}
 	snprintf(tmp_line, sizeof(tmp_line),
-		 "CPUAlloc=%u CPUErr=%u CPUTot=%u Features=%s",
-		 alloc_cpus, err_cpus, node_ptr->cpus, node_ptr->features);
+		 "CPUAlloc=%u CPUErr=%u CPUTot=%u CPULoad=%s Features=%s",
+		 alloc_cpus, err_cpus, node_ptr->cpus, load_str,
+		 node_ptr->features);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");
@@ -239,8 +246,9 @@ slurm_sprint_node_table (node_info_t * node_ptr,
 		snprintf(tmp_line, sizeof(tmp_line), "OS=%s ", node_ptr->os);
 		xstrcat(out, tmp_line);
 	}
-	snprintf(tmp_line, sizeof(tmp_line), "RealMemory=%u Sockets=%u",
-		 node_ptr->real_memory, node_ptr->sockets);
+	snprintf(tmp_line, sizeof(tmp_line),
+		 "RealMemory=%u Sockets=%u Boards=%u",
+		 node_ptr->real_memory, node_ptr->sockets, node_ptr->boards);
 	xstrcat(out, tmp_line);
 	if (one_liner)
 		xstrcat(out, " ");

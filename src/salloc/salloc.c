@@ -42,9 +42,7 @@
 #  include "config.h"
 #endif
 
-#if defined(__NetBSD__)
 #include <sys/resource.h> /* for struct rlimit */
-#endif
 #include <dirent.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -357,7 +355,7 @@ int main(int argc, char *argv[])
 		pending_job_id = alloc->job_id;
 #ifdef HAVE_BG
 		if (!_wait_bluegene_block_ready(alloc)) {
-			if(!allocation_interrupted)
+			if (!allocation_interrupted)
 				error("Something is wrong with the "
 				      "boot of the block.");
 			goto relinquish;
@@ -1075,10 +1073,12 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 
 	suspend_time = slurm_get_suspend_timeout();
 	resume_time  = slurm_get_resume_timeout();
-	if ((suspend_time == 0) || (resume_time == 0))
-		return 1;	/* Power save mode disabled */
-	max_delay = suspend_time + resume_time;
-	max_delay *= 5;		/* Allow for ResumeRate support */
+	if (suspend_time || resume_time) {
+		max_delay = suspend_time + resume_time;
+		max_delay *= 5;		/* Allow for ResumeRate support */
+	} else {
+		max_delay = 300;	/* Wait to 5 min for PrologSlurmctld */
+	}
 
 	pending_job_id = alloc->job_id;
 
@@ -1090,27 +1090,22 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 	for (i=0; (cur_delay < max_delay); i++) {
 		if (i) {
 			if (i == 1)
-				info("Waiting for nodes to boot");
+				info("Waiting for resource configuration");
 			else
 				debug("still waiting");
 			sleep(POLL_SLEEP);
 			cur_delay += POLL_SLEEP;
 		}
 
-		if (opt.wait_all_nodes)
-			rc = slurm_job_node_ready(alloc->job_id);
-		else {
-			is_ready = 1;
-			break;
-		}
-
+		rc = slurm_job_node_ready(alloc->job_id);
 		if (rc == READY_JOB_FATAL)
 			break;				/* fatal error */
 		if ((rc == READY_JOB_ERROR) || (rc == EAGAIN))
 			continue;			/* retry */
 		if ((rc & READY_JOB_STATE) == 0)	/* job killed */
 			break;
-		if (rc & READY_NODE_STATE) {		/* job and node ready */
+		if ((rc & READY_JOB_STATE) && 
+		    ((rc & READY_NODE_STATE) || !opt.wait_all_nodes)) {
 			is_ready = 1;
 			break;
 		}

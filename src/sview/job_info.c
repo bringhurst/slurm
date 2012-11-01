@@ -553,14 +553,12 @@ static int _cancel_job_id (uint32_t job_id, uint16_t signal)
 	int error_code = SLURM_SUCCESS, i;
 	char *temp = NULL;
 
-	for (i=0; i<MAX_CANCEL_RETRY; i++) {
-		if ((signal == (uint16_t)-1) || (signal == SIGKILL)) {
-			signal = 9;
-			error_code = slurm_kill_job(job_id, SIGKILL,
-						    false);
-		} else
-			error_code = slurm_signal_job(job_id, signal);
-
+	if (signal == (uint16_t)-1)
+		signal = SIGKILL;
+	for (i = 0; i < MAX_CANCEL_RETRY; i++) {
+		/* NOTE: RPC always sent to slurmctld rather than directly
+		 * to slurmd daemons */
+		error_code = slurm_kill_job(job_id, signal, false);
 		if (error_code == 0
 		    || (errno != ESLURM_TRANSITION_STATE_NO_UPDATE
 			&& errno != ESLURM_JOB_PENDING))
@@ -594,13 +592,17 @@ static int _cancel_step_id(uint32_t job_id, uint32_t step_id,
 	int error_code = SLURM_SUCCESS, i;
 	char *temp = NULL;
 
-	for (i=0; i<MAX_CANCEL_RETRY; i++) {
-		if (signal == (uint16_t)-1 || (signal == SIGKILL)) {
-			signal = 9;
+	if (signal == (uint16_t)-1)
+		signal = SIGKILL;
+	for (i = 0; i < MAX_CANCEL_RETRY; i++) {
+		/* NOTE: RPC always sent to slurmctld rather than directly
+		 * to slurmd daemons */
+		if (signal == SIGKILL) {
 			error_code = slurm_terminate_job_step(job_id, step_id);
+
 		} else {
-			error_code = slurm_signal_job_step(job_id, step_id,
-							   signal);
+			error_code = slurm_kill_job_step(job_id, step_id,
+							 signal);
 		}
 		if (error_code == 0
 		    || (errno != ESLURM_TRANSITION_STATE_NO_UPDATE
@@ -1211,7 +1213,17 @@ static int _get_node_cnt(job_info_t * job)
 {
 	int node_cnt = 0;
 
-	if (IS_JOB_PENDING(job) || IS_JOB_COMPLETING(job)) {
+	/*  For PENDING jobs, return the maximum of the requested nodelist,
+	 *   requested maximum number of nodes, or requested CPUs rounded
+	 *   to nearest node.
+	 *
+	 *  For COMPLETING jobs, the job->nodes nodelist has already been
+	 *   altered to list only the nodes still in the comp state, and
+	 *   thus we count only those nodes toward the total nodes still
+	 *   allocated to this job.
+	 */
+
+	if (IS_JOB_PENDING(job)) {
 		node_cnt = _nodes_in_list(job->req_nodes);
 		node_cnt = MAX(node_cnt, job->num_nodes);
 	} else

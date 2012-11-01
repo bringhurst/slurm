@@ -39,6 +39,7 @@
 #  include "config.h"
 #endif
 
+#include "src/common/slurm_xlator.h"
 #include "src/common/proc_args.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_auth.h"
@@ -367,6 +368,11 @@ extern int launch_p_setup_srun_opt(char **rest)
 	return command_pos;
 }
 
+extern int launch_p_handle_multi_prog_verify(int command_pos)
+{
+	return 0;
+}
+
 extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 				    void (*signal_function)(int),
 				    sig_atomic_t *destroy_job)
@@ -377,7 +383,8 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 }
 
 extern int launch_p_step_launch(
-	srun_job_t *job, slurm_step_io_fds_t *cio_fds, uint32_t *global_rc)
+	srun_job_t *job, slurm_step_io_fds_t *cio_fds, uint32_t *global_rc,
+	void (*signal_function)(int))
 {
 	pthread_t msg_thread;
 

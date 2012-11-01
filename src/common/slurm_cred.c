@@ -1242,7 +1242,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 
 	cred = _slurm_cred_alloc();
 	slurm_mutex_lock(&cred->mutex);
-	if(protocol_version >= SLURM_2_1_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_2_3_PROTOCOL_VERSION) {
 		safe_unpack32(&cred->jobid, buffer);
 		safe_unpack32(&cred->stepid, buffer);
 		safe_unpack32(&cred_uid, buffer);
@@ -1263,7 +1263,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		safe_unpackstr_xmalloc(&cred->step_hostlist, &len, buffer);
 		safe_unpack_time(&cred->ctime, buffer);
 
-		if(!(cluster_flags & CLUSTER_FLAG_BG)) {
+		if (!(cluster_flags & CLUSTER_FLAG_BG)) {
 			uint32_t tot_core_cnt;
 			safe_unpack32(&tot_core_cnt, buffer);
 			safe_unpackstr_xmalloc(&bit_fmt, &len, buffer);
@@ -1305,6 +1305,10 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		safe_unpackmem_xmalloc(sigp, &len, buffer);
 		cred->siglen = len;
 		xassert(len > 0);
+	} else {
+		error("slurm_cred_unpack: protocol_version"
+		      " %hu not supported", protocol_version);
+		goto unpack_error;
 	}
 	slurm_mutex_unlock(&cred->mutex);
 	return cred;
@@ -2069,7 +2073,8 @@ static void _pack_sbcast_cred(sbcast_cred_t *sbcast_cred, Buf buffer)
  *	including digital signature.
  * RET the sbcast credential or NULL on error */
 sbcast_cred_t *create_sbcast_cred(slurm_cred_ctx_t ctx,
-				  uint32_t job_id, char *nodes)
+				  uint32_t job_id, char *nodes,
+				  time_t expiration)
 {
 	Buf buffer;
 	int rc;
@@ -2082,7 +2087,7 @@ sbcast_cred_t *create_sbcast_cred(slurm_cred_ctx_t ctx,
 
 	sbcast_cred = xmalloc(sizeof(struct sbcast_cred));
 	sbcast_cred->ctime      = now;
-	sbcast_cred->expiration = now + DEFAULT_EXPIRATION_WINDOW;
+	sbcast_cred->expiration = expiration;
 	sbcast_cred->jobid      = job_id;
 	sbcast_cred->nodes      = xstrdup(nodes);
 
@@ -2263,4 +2268,5 @@ void  print_sbcast_cred(sbcast_cred_t *sbcast_cred)
 	info("Sbcast_cred: Jobid   %u", sbcast_cred->jobid         );
 	info("Sbcast_cred: Nodes   %s", sbcast_cred->nodes         );
 	info("Sbcast_cred: ctime   %s", ctime(&sbcast_cred->ctime) );
+	info("Sbcast_cred: Expire  %s", ctime(&sbcast_cred->expiration) );
 }

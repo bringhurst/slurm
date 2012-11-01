@@ -56,6 +56,7 @@
 #include "src/common/plugrack.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurmdbd_defs.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
@@ -105,6 +106,7 @@ static pthread_mutex_t task_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static bool jobacct_shutdown = true;
 static bool jobacct_suspended = 0;
+static bool plugin_polling = true;
 
 static uint32_t jobacct_job_id     = 0;
 static uint32_t jobacct_step_id    = 0;
@@ -146,8 +148,8 @@ static void _pack_jobacct_id(jobacct_id_t *jobacct_id,
 		pack32((uint32_t) jobacct_id->nodeid, buffer);
 		pack16((uint16_t) jobacct_id->taskid, buffer);
 	} else {
-		pack32((uint32_t) 0, buffer);
-		pack16((uint16_t) 0, buffer);
+		pack32((uint32_t) NO_VAL, buffer);
+		pack16((uint16_t) NO_VAL, buffer);
 	}
 }
 
@@ -225,8 +227,10 @@ extern int jobacct_gather_init(void)
 		goto done;
 	}
 
-	if (!strcasecmp(type, "jobacct_gather/none"))
+	if (!strcasecmp(type, "jobacct_gather/none")) {
+		plugin_polling = false;
 		goto done;
+	}
 
 	plugin_type = type;
 	type = slurm_get_proctrack_type();
@@ -276,6 +280,9 @@ extern int jobacct_gather_startpoll(uint16_t frequency)
 	pthread_attr_t attr;
 	pthread_t _watch_tasks_thread_id;
 
+	if (!plugin_polling)
+		return SLURM_SUCCESS;
+
 	if (jobacct_gather_init() < 0)
 		return SLURM_ERROR;
 
@@ -290,7 +297,7 @@ extern int jobacct_gather_startpoll(uint16_t frequency)
 
 	task_list = list_create(jobacctinfo_destroy);
 	if (frequency == 0) {	/* don't want dynamic monitoring? */
-		debug2("jobacct AIX dynamic logging disabled");
+		debug2("jobacct_gather dynamic logging disabled");
 		return retval;
 	}
 
@@ -301,11 +308,11 @@ extern int jobacct_gather_startpoll(uint16_t frequency)
 
 	if  (pthread_create(&_watch_tasks_thread_id, &attr,
 			    &_watch_tasks, NULL)) {
-		debug("jobacct-gather failed to create _watch_tasks "
+		debug("jobacct_gather failed to create _watch_tasks "
 		      "thread: %m");
 		frequency = 0;
 	} else
-		debug3("jobacct-gather AIX dynamic logging enabled");
+		debug3("jobacct_gather dynamic logging enabled");
 	slurm_attr_destroy(&attr);
 
 	return retval;
@@ -335,7 +342,7 @@ extern void jobacct_gather_change_poll(uint16_t frequency)
 	if (jobacct_gather_init() < 0)
 		return;
 
-	if (freq == 0 && frequency != 0) {
+	if (plugin_polling && freq == 0 && frequency != 0) {
 		pthread_attr_t attr;
 		pthread_t _watch_tasks_thread_id;
 		/* create polling thread */
@@ -380,6 +387,9 @@ extern int jobacct_gather_add_task(pid_t pid, jobacct_id_t *jobacct_id)
 	if (jobacct_gather_init() < 0)
 		return SLURM_ERROR;
 
+	if (!plugin_polling)
+		return SLURM_SUCCESS;
+
 	if (jobacct_shutdown)
 		return SLURM_ERROR;
 
@@ -412,7 +422,7 @@ error:
 
 extern jobacctinfo_t *jobacct_gather_stat_task(pid_t pid)
 {
-	if (jobacct_shutdown)
+	if (!plugin_polling || jobacct_shutdown)
 		return NULL;
 	else if (pid) {
 		struct jobacctinfo *jobacct = NULL;
@@ -459,7 +469,7 @@ extern jobacctinfo_t *jobacct_gather_remove_task(pid_t pid)
 	struct jobacctinfo *jobacct = NULL;
 	ListIterator itr = NULL;
 
-	if (jobacct_shutdown)
+	if (!plugin_polling || jobacct_shutdown)
 		return NULL;
 
 	slurm_mutex_lock(&task_list_lock);
@@ -489,7 +499,7 @@ error:
 
 extern int jobacct_gather_set_proctrack_container_id(uint64_t id)
 {
-	if (pgid_plugin)
+	if (!plugin_polling || pgid_plugin)
 		return SLURM_SUCCESS;
 
 	if (cont_id != (uint64_t)NO_VAL)
@@ -510,6 +520,9 @@ extern int jobacct_gather_set_proctrack_container_id(uint64_t id)
 extern int jobacct_gather_set_mem_limit(uint32_t job_id, uint32_t step_id,
 					uint32_t mem_limit)
 {
+	if (!plugin_polling)
+		return SLURM_SUCCESS;
+
 	if ((job_id == 0) || (mem_limit == 0)) {
 		error("jobacct_gather_set_mem_limit: jobid:%u mem_limit:%u",
 		      job_id, mem_limit);
@@ -527,6 +540,9 @@ extern int jobacct_gather_set_mem_limit(uint32_t job_id, uint32_t step_id,
 extern void jobacct_gather_handle_mem_limit(
 	uint32_t total_job_mem, uint32_t total_job_vsize)
 {
+	if (!plugin_polling)
+		return;
+
 	if (jobacct_mem_limit) {
 		if (jobacct_step_id == NO_VAL) {
 			debug("Job %u memory used:%u limit:%u KB",
@@ -567,7 +583,12 @@ extern void jobacct_gather_handle_mem_limit(
 
 extern jobacctinfo_t *jobacctinfo_create(jobacct_id_t *jobacct_id)
 {
-	struct jobacctinfo *jobacct = xmalloc(sizeof(struct jobacctinfo));
+	struct jobacctinfo *jobacct;
+
+	if (!plugin_polling)
+		return NULL;
+
+	jobacct = xmalloc(sizeof(struct jobacctinfo));
 
 	if (!jobacct_id) {
 		jobacct_id_t temp_id;
@@ -612,6 +633,9 @@ extern int jobacctinfo_setinfo(jobacctinfo_t *jobacct,
 	uint32_t *uint32 = (uint32_t *) data;
 	jobacct_id_t *jobacct_id = (jobacct_id_t *) data;
 	struct jobacctinfo *send = (struct jobacctinfo *) data;
+
+	if (!plugin_polling)
+		return SLURM_SUCCESS;
 
 	switch (type) {
 	case JOBACCT_DATA_TOTAL:
@@ -681,6 +705,9 @@ extern int jobacctinfo_getinfo(
 	struct rusage *rusage = (struct rusage *)data;
 	struct jobacctinfo *send = (struct jobacctinfo *) data;
 
+	if (!plugin_polling)
+		return SLURM_SUCCESS;
+
 	switch (type) {
 	case JOBACCT_DATA_TOTAL:
 		memcpy(send, jobacct, sizeof(struct jobacctinfo));
@@ -739,14 +766,32 @@ rwfail:
 	return SLURM_ERROR;
 }
 
-extern void jobacctinfo_pack(
-	jobacctinfo_t *jobacct, uint16_t rpc_version, Buf buffer)
+extern void jobacctinfo_pack(jobacctinfo_t *jobacct,
+			     uint16_t rpc_version, uint16_t protocol_type,
+			     Buf buffer)
 {
 	int i = 0;
 
-	if (!jobacct) {
+	if (!plugin_polling && (protocol_type != PROTOCOL_TYPE_DBD))
+		return;
+
+	/* The function can take calls from both DBD and from regular
+	 * SLURM functions.  We choose to standardize on using the
+	 * SLURM_PROTOCOL_VERSION here so if PROTOCOL_TYPE_DBD comes
+	 * in we need to translate the DBD rpc_version to use the
+	 * SLURM protocol_version.
+	 *
+	 * If this function ever changes make sure the
+	 * slurmdbd_translate_rpc function has been updated with the
+	 * new protocol version.
+	 */
+	if (protocol_type == PROTOCOL_TYPE_DBD)
+		rpc_version = slurmdbd_translate_rpc(rpc_version);
+
+	/* pack an empty record */
+	if (!jobacct || (jobacct->min_cpu == NO_VAL)) {
 		for (i = 0; i < 12; i++)
-			pack32((uint32_t) 0, buffer);
+			pack32((uint32_t)NO_VAL, buffer);
 		for (i = 0; i < 4; i++)
 			_pack_jobacct_id(NULL, rpc_version, buffer);
 		return;
@@ -771,10 +816,27 @@ extern void jobacctinfo_pack(
 	_pack_jobacct_id(&jobacct->min_cpu_id, rpc_version, buffer);
 }
 
-extern int jobacctinfo_unpack(
-	jobacctinfo_t **jobacct, uint16_t rpc_version, Buf buffer)
+extern int jobacctinfo_unpack(jobacctinfo_t **jobacct,
+			      uint16_t rpc_version, uint16_t protocol_type,
+			      Buf buffer)
 {
 	uint32_t uint32_tmp;
+
+	if (!plugin_polling && (protocol_type != PROTOCOL_TYPE_DBD))
+		return SLURM_SUCCESS;
+
+	/* The function can take calls from both DBD and from regular
+	 * SLURM functions.  We choose to standardize on using the
+	 * SLURM_PROTOCOL_VERSION here so if PROTOCOL_TYPE_DBD comes
+	 * in we need to translate the DBD rpc_version to use the
+	 * SLURM protocol_version.
+	 *
+	 * If this function ever changes make sure the
+	 * slurmdbd_translate_rpc function has been updated with the
+	 * new protocol version.
+	 */
+	if (protocol_type == PROTOCOL_TYPE_DBD)
+		rpc_version = slurmdbd_translate_rpc(rpc_version);
 
 	*jobacct = xmalloc(sizeof(struct jobacctinfo));
 	safe_unpack32(&uint32_tmp, buffer);
@@ -810,8 +872,7 @@ extern int jobacctinfo_unpack(
 	return SLURM_SUCCESS;
 
 unpack_error:
-	debug2("jobacctinfo_unpack:"
-		"unpack_error: size_buf(buffer) %u",
+	debug2("jobacctinfo_unpack: unpack_error: size_buf(buffer) %u",
 	size_buf(buffer));
 	xfree(*jobacct);
        	return SLURM_ERROR;
@@ -819,9 +880,12 @@ unpack_error:
 
 extern void jobacctinfo_aggregate(jobacctinfo_t *dest, jobacctinfo_t *from)
 {
+	if (!plugin_polling)
+		return;
+
 	xassert(dest);
 
-	if (!from)
+	if (!from || (from->min_cpu == (uint32_t)NO_VAL))
 		return;
 
 	if (dest->max_vsize < from->max_vsize) {

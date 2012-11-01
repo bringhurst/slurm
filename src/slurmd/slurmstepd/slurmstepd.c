@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <signal.h>
 
+#include "src/common/cpu_frequency.h"
 #include "src/common/gres.h"
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_rlimits_info.h"
@@ -284,8 +285,7 @@ static int handle_spank_mode (int argc, char *argv[])
 	if (get_jobid_uid_from_env (&jobid, &uid) < 0)
 		return error ("spank environment invalid");
 
-	verbose ("Running spank/%s for jobid [%u] uid [%u]",
-		mode, jobid, uid);
+	debug("Running spank/%s for jobid [%u] uid [%u]", mode, jobid, uid);
 
 	if (strcmp (mode, "prolog") == 0) {
 		if (spank_job_prolog (jobid, uid) < 0)
@@ -429,6 +429,9 @@ _init_from_slurmd(int sock, char **argv,
 	/* Receive GRES information from slurmd */
 	gres_plugin_recv_stepd(sock);
 
+	/* Receive cpu_frequency info from slurmd */
+	cpu_freq_recv_info(sock);
+
 	/* receive req from slurmd */
 	safe_read(sock, &len, sizeof(int));
 	incoming_buffer = xmalloc(sizeof(char) * len);
@@ -437,6 +440,7 @@ _init_from_slurmd(int sock, char **argv,
 
 	msg = xmalloc(sizeof(slurm_msg_t));
 	slurm_msg_t_init(msg);
+	msg->protocol_version = SLURM_PROTOCOL_VERSION;
 
 	switch(step_type) {
 	case LAUNCH_BATCH_JOB:

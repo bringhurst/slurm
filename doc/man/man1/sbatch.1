@@ -1,4 +1,4 @@
-.TH "sbatch" "1" "SLURM 2.5" "June 2012" "SLURM Commands"
+.TH "sbatch" "1" "SLURM 2.5" "October 2012" "SLURM Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to SLURM.
@@ -207,7 +207,8 @@ above when task/affinity plugin is enabled.
 
 .TP
 \fB\-\-cpu_bind\fR=[{\fIquiet,verbose\fR},]\fItype\fR
-Bind tasks to CPUs. Used only when the task/affinity plugin is enabled.
+Bind tasks to CPUs.
+Used only when the task/affinity or task/cgroup plugin is enabled.
 The configuration parameter \fBTaskPluginParam\fR may override these options.
 For example, if \fBTaskPluginParam\fR is configured to bind to cores,
 your job will not be able to bind tasks to sockets.
@@ -495,6 +496,7 @@ The batch script will only be submitted to the controller if the resources
 necessary to grant its job allocation are immediately available.  If the
 job allocation will have to wait in a queue of pending jobs, the batch script
 will not be submitted.
+NOTE: There is limitted support for this option with batch jobs.
 
 .TP
 \fB\-i\fR, \fB\-\-input\fR=<\fIfilename pattern\fR>
@@ -671,10 +673,11 @@ This parameter would generally be used if whole nodes
 are allocated to jobs (\fBSelectType=select/linear\fR).
 Also see \fB\-\-mem\-per\-cpu\fR.
 \fB\-\-mem\fR and \fB\-\-mem\-per\-cpu\fR are mutually exclusive.
-NOTE: Enforcement of memory limits currently requires enabling of
-accounting, which samples memory use on a periodic basis (data need
-not be stored, just collected). A task may exceed the memory limit 
-until the next periodic accounting sample.
+NOTE: Enforcement of memory limits currently relies upon the task/cgroup plugin
+or enabling of accounting, which samples memory use on a periodic basis (data
+need not be stored, just collected). In both cases memory use is based upon
+the job's Resident Set Size (RSS). A task may exceed the memory limit until
+the next periodic accounting sample.
 
 .TP
 \fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
@@ -815,11 +818,15 @@ Enable bulk transfer of data using Remote Direct-Memory Access (RDMA).
 The optional \fIresources\fR specification is a numeric value which can have
 a suffix of "k", "K", "m", "M", "g" or "G" for kilobytes, megabytes or
 gigabytes.
+NOTE: The \fIresources\fR specification is not supported by the underlying
+IBM infrastructure as of Parallel Environment version 2.2 and no value should
+be specified at this time.
 .TP
 \fBCAU\fR=<\fIcount\fR>
 Number of Collecitve Accelleration Units (CAU) required.
-Applies only to IBM Power7 processors.
+Applies only to IBM Power7-IH processors.
 Default value is zero.
+Independent CAU will be allocated for each programming interface (MPI, LAPI, etc.)
 .TP
 \fBDEVNAME\fR=<\fIname\fR>
 Specify the device name to use for communications (e.g. "eth0" or "mlx4_0").
@@ -830,13 +837,17 @@ The supported values of \fItype\fR are:
 "IB" (InfiniBand), "HFI" (P7 Host Fabric Interface),
 "IPONLY" (IP-Only interfaces), "HPCE" (HPC Ethernet), and
 "KMUX" (Kernel Emulation of HPCE).
+The devices allocated to a job must all be of the same type.
+The default value depends upon depends upon what hardware is available and in
+order of preferences is IPONLY (which is not considered in User Space mode),
+HFI, IB, HPCE, and KMUX.
 .TP
-\fBIMMED\fR=<\fIcount\fR>
+\fBIMMED\fR =<\fIcount\fR>
 Number of immediate send slots per window required.
-Applies only to IBM Power7 processors.
+Applies only to IBM Power7-IH processors.
 Default value is zero.
 .TP
-\fBINSTANCES\fR=<\fIcount\fR>
+\fBINSTANCES\fR =<\fIcount\fR>
 Specify number of network connections for each task on each network connection.
 The default instance count is 1.
 .TP
@@ -847,14 +858,17 @@ Use Internet Protocol (IP) version 4 communications (default).
 Use Internet Protocol (IP) version 6 communications.
 .TP
 \fBLAPI\fR
-Use the LAPI protocol.
+Use the LAPI programming interface.
 .TP
 \fBMPI\fR
-Use the MPI protocol.
-MPI is the default protocol.
+Use the MPI programming interface.
+MPI is the default interface.
 .TP
 \fBPAMI\fR
-Use the PAMI protocol.
+Use the PAMI programming interface.
+.TP
+\fBSHMEM\fR
+Use the OpenSHMEM programming interface.
 .TP
 \fBSN_ALL\fR
 Use all available switch networks (default).
@@ -863,7 +877,7 @@ Use all available switch networks (default).
 Use one available switch network.
 .TP
 \fBUPC\fR
-Use the UPC protocol.
+Use the UPC programming interface.
 .TP
 \fBUS\fR
 Use User Space communications.
@@ -1118,8 +1132,10 @@ Equivalent to \fB\-\-ntasks\-per\-node\fR.
 .TP
 \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
 Restrict node selection to nodes with at least the specified number of
-threads per core.  See additional information under \fB\-B\fR option
-above when task/affinity plugin is enabled.
+threads per core.  NOTE: "Threads" refers to the number of processing units on
+each core rather than the number of appliation tasks to be launched per core.
+See additional information under \fB\-B\fR option above when task/affinity
+plugin is enabled.
 
 .TP
 \fB\-\-time\-min\fR=<\fItime\fR>
@@ -1231,13 +1247,13 @@ each dimension (i.e. M,T,T,T will give you a torus connection is all
 dimensions expect the first).
 
 .TP
-\fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR>
-Specify the geometry requirements for the job. The three numbers
-represent the required geometry giving dimensions in the X, Y and
-Z directions. For example "\-\-geometry=2x3x4", specifies a block
-of nodes having 2 x 3 x 4 = 24 nodes (actually midplanes on
-Blue Gene).  On a BGQ system the dimensions are AxXxYxZ, and can not
-be used to allocation sub-blocks.
+\fB\-g\fR, \fB\-\-geometry\fR=<\fIXxYxZ\fR> | <\fIAxXxYxZ\fR>
+Specify the geometry requirements for the job. On BlueGene/L and BlueGene/P
+systems there are three numbers giving dimensions in the X, Y and Z directions,
+while on BlueGene/Q systems there are four numbers giving dimensions in the
+A, X, Y and Z directions and can not be used to allocate sub-blocks.
+For example "\-\-geometry=1x2x3x4", specifies a block of nodes having
+1 x 2 x 3 x 4 = 24 nodes (actually midplanes on BlueGene).
 
 .TP
 \fB\-\-ioload\-image\fR=<\fIpath\fR>

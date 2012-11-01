@@ -857,10 +857,13 @@ extern void slurm_free_suspend_msg(suspend_msg_t *msg)
 	xfree(msg);
 }
 
-/*extern void slurm_free_stats_request_msg(stats_desc_msg_t *msg)
+extern void slurm_free_suspend_int_msg(suspend_int_msg_t *msg)
 {
-	xfree(msg);
-}*/
+	if (msg) {
+		interconnect_suspend_info_free(msg->switch_info);
+		xfree(msg);
+	}
+}
 
 extern void slurm_free_stats_response_msg(stats_info_response_msg_t *msg)
 {
@@ -980,6 +983,11 @@ inline void slurm_free_forward_data_msg(forward_data_msg_t *msg)
 		xfree(msg->data);
 		xfree(msg);
 	}
+}
+
+extern void slurm_free_ping_slurmd_resp(ping_slurmd_resp_msg_t *msg)
+{
+	xfree(msg);
 }
 
 extern char *preempt_mode_string(uint16_t preempt_mode)
@@ -1307,11 +1315,11 @@ extern char *trigger_type(uint32_t trig_type)
 	else if (trig_type == TRIGGER_TYPE_PRI_CTLD_ACCT_FULL)
 		return "primary_slurmctld_acct_buffer_full";
 	else if (trig_type == TRIGGER_TYPE_BU_CTLD_FAIL)
-		return "backup_ctld_failure";
+		return "backup_slurmctld_failure";
 	else if (trig_type == TRIGGER_TYPE_BU_CTLD_RES_OP)
-		return "backup_ctld_resumed_operation";
+		return "backup_slurmctld_resumed_operation";
 	else if (trig_type == TRIGGER_TYPE_BU_CTLD_AS_CTRL)
-		return "backup_ctld_assumed_control";
+		return "backup_slurmctld_assumed_control";
 	else if (trig_type == TRIGGER_TYPE_PRI_DBD_FAIL)
 		return "primary_slurmdbd_failure";
 	else if (trig_type == TRIGGER_TYPE_PRI_DBD_RES_OP)
@@ -2507,6 +2515,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case SRUN_REQUEST_SUSPEND:
 		slurm_free_suspend_msg(data);
 		break;
+	case REQUEST_SUSPEND_INT:
+		slurm_free_suspend_int_msg(data);
+		break;
 	case REQUEST_JOB_READY:
 	case REQUEST_JOB_REQUEUE:
 	case REQUEST_JOB_INFO_SINGLE:
@@ -2616,6 +2627,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONCE_SPANK_ENVIRONMENT:
 		slurm_free_spank_env_responce_msg(data);
 		break;
+	case RESPONSE_PING_SLURMD:
+		slurm_free_ping_slurmd_resp(data);
+		break;
 	default:
 		error("invalid type trying to be freed %u", type);
 		break;
@@ -2642,6 +2656,9 @@ extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data)
 		break;
 	case RESPONSE_SLURM_RC:
 		rc = ((return_code_msg_t *)data)->return_code;
+		break;
+	case RESPONSE_PING_SLURMD:
+		rc = SLURM_SUCCESS;
 		break;
 	case RESPONSE_FORWARD_FAILED:
 		/* There may be other reasons for the failure, but

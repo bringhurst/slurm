@@ -41,6 +41,7 @@
 #include "as_mysql_usage.h"
 #include "as_mysql_wckey.h"
 
+#include "src/common/gres.h"
 #include "src/common/node_select.h"
 #include "src/common/parse_time.h"
 #include "src/common/slurm_jobacct_gather.h"
@@ -415,7 +416,7 @@ no_rollup_change:
 			"id_group, nodelist, id_resv, timelimit, "
 			"time_eligible, time_submit, time_start, "
 			"job_name, track_steps, state, priority, cpus_req, "
-			"cpus_alloc, nodes_alloc",
+			"cpus_alloc, nodes_alloc, gres_req, gres_alloc",
 			mysql_conn->cluster_name, job_table);
 
 		if (job_ptr->account)
@@ -431,7 +432,8 @@ no_rollup_change:
 
 		xstrfmtcat(query,
 			   ") values (%u, %u, %u, %u, %u, %u, '%s', %u, %u, "
-			   "%ld, %ld, %ld, '%s', %u, %u, %u, %u, %u, %u",
+			   "%ld, %ld, %ld, '%s', %u, %u, %u, %u, %u, %u, "
+			   "'%s', '%s'",
 			   job_ptr->job_id, job_ptr->assoc_id,
 			   job_ptr->qos_id, wckeyid,
 			   job_ptr->user_id, job_ptr->group_id, nodes,
@@ -439,7 +441,8 @@ no_rollup_change:
 			   begin_time, submit_time, start_time,
 			   jname, track_steps, job_state,
 			   job_ptr->priority, job_ptr->details->min_cpus,
-			   job_ptr->total_cpus, node_cnt);
+			   job_ptr->total_cpus, node_cnt, job_ptr->gres_req,
+			   job_ptr->gres_alloc);
 
 		if (job_ptr->account)
 			xstrfmtcat(query, ", '%s'", job_ptr->account);
@@ -460,13 +463,15 @@ no_rollup_change:
 			   "time_submit=%ld, time_start=%ld, "
 			   "job_name='%s', track_steps=%u, id_qos=%u, "
 			   "state=greatest(state, %u), priority=%u, "
-			   "cpus_req=%u, cpus_alloc=%u, nodes_alloc=%u",
+			   "cpus_req=%u, cpus_alloc=%u,  "
+			   "nodes_alloc=%u, gres_req='%s', gres_alloc='%s'",
 			   wckeyid, job_ptr->user_id, job_ptr->group_id, nodes,
 			   job_ptr->resv_id, job_ptr->time_limit,
 			   submit_time, start_time,
 			   jname, track_steps, job_ptr->qos_id, job_state,
 			   job_ptr->priority, job_ptr->details->min_cpus,
-			   job_ptr->total_cpus, node_cnt);
+			   job_ptr->total_cpus, node_cnt, job_ptr->gres_req,
+			   job_ptr->gres_alloc);
 
 		if (job_ptr->account)
 			xstrfmtcat(query, ", account='%s'", job_ptr->account);
@@ -516,13 +521,16 @@ no_rollup_change:
 
 		xstrfmtcat(query, "time_start=%ld, job_name='%s', state=%u, "
 			   "cpus_alloc=%u, nodes_alloc=%u, id_qos=%u, "
-			   "id_assoc=%u, id_wckey=%u, id_resv=%u, timelimit=%u "
-			   "where job_db_inx=%d",
+			   "id_assoc=%u, id_wckey=%u, id_resv=%u, "
+			   "timelimit=%u, gres_req='%s', gres_alloc='%s', "
+			   "time_eligible=%ld where job_db_inx=%d",
 			   start_time, jname, job_state,
 			   job_ptr->total_cpus, node_cnt, job_ptr->qos_id,
 			   job_ptr->assoc_id, wckeyid,
 			   job_ptr->resv_id, job_ptr->time_limit,
-			   job_ptr->db_index);
+			   job_ptr->gres_req, job_ptr->gres_alloc,
+			   begin_time, job_ptr->db_index);
+
 		debug3("%d(%s:%d) query\n%s",
 		       mysql_conn->conn, THIS_FILE, __LINE__, query);
 		rc = mysql_db_query(mysql_conn, query);
@@ -919,17 +927,16 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 				  struct step_record *step_ptr)
 {
 	time_t now;
-	int elapsed;
 	int comp_status;
 	int cpus = 0;
 	struct jobacctinfo *jobacct = (struct jobacctinfo *)step_ptr->jobacct;
 	struct jobacctinfo dummy_jobacct;
-	double ave_vsize = 0, ave_rss = 0, ave_pages = 0;
-	double ave_cpu = 0, ave_cpu2 = 0;
+	double ave_vsize = NO_VAL, ave_rss = NO_VAL, ave_pages = NO_VAL;
+	double ave_cpu = (double)NO_VAL;
 	char *query = NULL;
 	int rc =SLURM_SUCCESS;
 	uint32_t exit_code = 0;
-	time_t start_time, submit_time;
+	time_t submit_time;
 
 	if (!step_ptr->job_ptr->db_index
 	    && ((!step_ptr->job_ptr->details
@@ -940,14 +947,10 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 		return SLURM_ERROR;
 	}
 
-	if (step_ptr->job_ptr->resize_time) {
-		submit_time = start_time = step_ptr->job_ptr->resize_time;
-		if (step_ptr->start_time > submit_time)
-			start_time = step_ptr->start_time;
-	} else {
-		start_time = step_ptr->start_time;
+	if (step_ptr->job_ptr->resize_time)
+		submit_time = step_ptr->job_ptr->resize_time;
+	else
 		submit_time = step_ptr->job_ptr->details->submit_time;
-	}
 
 	if (jobacct == NULL) {
 		/* JobAcctGather=slurmdb_gather/none, no data to process */
@@ -977,9 +980,6 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 #endif
 	}
 
-	if ((elapsed = (now - start_time)) < 0)
-		elapsed = 0;	/* For *very* short jobs, if clock is wrong */
-
 	exit_code = step_ptr->exit_code;
 	if (WIFSIGNALED(exit_code)) {
 		comp_status = JOB_CANCELLED;
@@ -991,7 +991,7 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 	}
 
 	/* figure out the ave of the totals sent */
-	if (cpus > 0) {
+	if ((jobacct->min_cpu != NO_VAL) && cpus > 0) {
 		ave_vsize = (double)jobacct->tot_vsize;
 		ave_vsize /= (double)cpus;
 		ave_rss = (double)jobacct->tot_rss;
@@ -1000,10 +1000,6 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 		ave_pages /= (double)cpus;
 		ave_cpu = (double)jobacct->tot_cpu;
 		ave_cpu /= (double)cpus;
-	}
-
-	if (jobacct->min_cpu != NO_VAL) {
-		ave_cpu2 = (double)jobacct->min_cpu;
 	}
 
 	if (!step_ptr->job_ptr->db_index) {
@@ -1037,7 +1033,7 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 		"max_rss_node=%u, ave_rss=%f, "
 		"max_pages=%u, max_pages_task=%u, "
 		"max_pages_node=%u, ave_pages=%f, "
-		"min_cpu=%f, min_cpu_task=%u, "
+		"min_cpu=%u, min_cpu_task=%u, "
 		"min_cpu_node=%u, ave_cpu=%f "
 		"where job_db_inx=%d and id_step=%d",
 		mysql_conn->cluster_name, step_table, (int)now,
@@ -1064,7 +1060,7 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 		jobacct->max_pages_id.taskid,	/* max pages task */
 		jobacct->max_pages_id.nodeid,	/* max pages node */
 		ave_pages,	/* ave pages */
-		ave_cpu2,	/* min cpu */
+		jobacct->min_cpu,	/* min cpu */
 		jobacct->min_cpu_id.taskid,	/* min cpu task */
 		jobacct->min_cpu_id.nodeid,	/* min cpu node */
 		ave_cpu,	/* ave cpu */

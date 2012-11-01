@@ -46,12 +46,14 @@
 
 typedef struct {
 	int (*setup_srun_opt)      (char **rest);
+	int (*handle_multi_prog)   (int command_pos);
 	int (*create_job_step)     (srun_job_t *job, bool use_all_cpus,
 				    void (*signal_function)(int),
 				    sig_atomic_t *destroy_job);
 	int (*step_launch)         (srun_job_t *job,
 				    slurm_step_io_fds_t *cio_fds,
-				    uint32_t *global_rc);
+				    uint32_t *global_rc,
+				    void (*signal_function)(int));
 	int (*step_wait)           (srun_job_t *job, bool got_alloc);
 	int (*step_terminate)      (void);
 	void (*print_status)       (void);
@@ -63,6 +65,7 @@ typedef struct {
  */
 static const char *syms[] = {
 	"launch_p_setup_srun_opt",
+	"launch_p_handle_multi_prog_verify",
 	"launch_p_create_job_step",
 	"launch_p_step_launch",
 	"launch_p_step_wait",
@@ -209,6 +212,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 	else
 		job->ctx_params.cpu_count = opt.ntasks;
 
+	job->ctx_params.cpu_freq = opt.cpu_freq;
 	job->ctx_params.relative = (uint16_t)opt.relative;
 	job->ctx_params.ckpt_interval = (uint16_t)opt.ckpt_interval;
 	job->ctx_params.ckpt_dir = opt.ckpt_dir;
@@ -284,6 +288,7 @@ extern int launch_common_create_job_step(srun_job_t *job, bool use_all_cpus,
 		    ((rc != ESLURM_NODES_BUSY) && (rc != ESLURM_PORTS_BUSY) &&
 		     (rc != ESLURM_PROLOG_RUNNING) &&
 		     (rc != SLURM_PROTOCOL_SOCKET_IMPL_TIMEOUT) &&
+		     (rc != ESLURM_INTERCONNECT_BUSY) &&
 		     (rc != ESLURM_DISABLED))) {
 			error ("Unable to create job step: %m");
 			return SLURM_ERROR;
@@ -433,6 +438,14 @@ extern int launch_g_setup_srun_opt(char **rest)
 	return (*(ops.setup_srun_opt))(rest);
 }
 
+extern int launch_g_handle_multi_prog_verify(int command_pos)
+{
+	if (launch_init() < 0)
+		return 0;
+
+	return (*(ops.handle_multi_prog))(command_pos);
+}
+
 extern int launch_g_create_job_step(srun_job_t *job, bool use_all_cpus,
 				    void (*signal_function)(int),
 				    sig_atomic_t *destroy_job)
@@ -446,12 +459,12 @@ extern int launch_g_create_job_step(srun_job_t *job, bool use_all_cpus,
 
 extern int launch_g_step_launch(
 	srun_job_t *job, slurm_step_io_fds_t *cio_fds,
-	uint32_t *global_rc)
+	uint32_t *global_rc, void (*signal_function)(int))
 {
 	if (launch_init() < 0)
 		return SLURM_ERROR;
 
-	return (*(ops.step_launch))(job, cio_fds, global_rc);
+	return (*(ops.step_launch))(job, cio_fds, global_rc, signal_function);
 }
 
 extern int launch_g_step_wait(srun_job_t *job, bool got_alloc)

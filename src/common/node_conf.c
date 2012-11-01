@@ -86,6 +86,9 @@ struct node_record *node_record_table_ptr = NULL;	/* node records */
 struct node_record **node_hash_table = NULL;	/* node_record hash table */
 int node_record_count = 0;		/* count in node_record_table_ptr */
 
+uint16_t *cr_node_num_cores = NULL;
+uint32_t *cr_node_cores_offset = NULL;
+
 static void	_add_config_feature(char *feature, bitstr_t *node_bitmap);
 static int	_build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 					    struct config_record *config_ptr);
@@ -224,13 +227,13 @@ static int _build_single_nodeline_info(slurm_conf_node_t *node_ptr,
 		error("At least as many NodeAddr are required as NodeName");
 		goto cleanup;
 	}
-#endif	/* MULTIPLE_SLURMD */
 	if (hostname_count < alias_count) {
 		error("At least as many NodeHostname are required "
 		      "as NodeName");
 		goto cleanup;
 	}
-#endif
+#endif	/* MULTIPLE_SLURMD */
+#endif	/* HAVE_FRONT_END */
 	if ((port_count != alias_count) && (port_count > 1)) {
 		error("Port count must equal that of NodeName "
 		      "records or there must be no more than one");
@@ -644,6 +647,7 @@ extern int build_all_nodeline_info (bool set_bitmap)
 		config_ptr = create_config_record();
 		config_ptr->nodes = xstrdup(node->nodenames);
 		config_ptr->cpus = node->cpus;
+		config_ptr->boards = node->boards;
 		config_ptr->sockets = node->sockets;
 		config_ptr->cores = node->cores;
 		config_ptr->threads = node->threads;
@@ -778,6 +782,8 @@ extern struct node_record *create_node_record (
 	node_ptr->config_ptr = config_ptr;
 	/* these values will be overwritten when the node actually registers */
 	node_ptr->cpus = config_ptr->cpus;
+	node_ptr->cpu_load = NO_VAL;
+	node_ptr->boards = config_ptr->boards;
 	node_ptr->sockets = config_ptr->sockets;
 	node_ptr->cores = config_ptr->cores;
 	node_ptr->threads = config_ptr->threads;
@@ -1028,4 +1034,54 @@ extern int state_str2int(const char *state_str, char *node_name)
 		errno = EINVAL;
 	}
 	return state_val;
+}
+
+/* (re)set cr_node_num_cores arrays */
+extern void cr_init_global_core_data(struct node_record *node_ptr, int node_cnt,
+				     uint16_t fast_schedule)
+{
+	uint32_t n;
+
+	cr_fini_global_core_data();
+
+	cr_node_num_cores = xmalloc(node_cnt * sizeof(uint16_t));
+	cr_node_cores_offset = xmalloc((node_cnt+1) * sizeof(uint32_t));
+
+	for (n = 0; n < node_cnt; n++) {
+		uint16_t cores;
+		if (fast_schedule) {
+			cores  = node_ptr[n].config_ptr->cores;
+			cores *= node_ptr[n].config_ptr->sockets;
+		} else {
+			cores  = node_ptr[n].cores;
+			cores *= node_ptr[n].sockets;
+		}
+		cr_node_num_cores[n] = cores;
+		if (n > 0) {
+			cr_node_cores_offset[n] = cr_node_cores_offset[n-1] +
+						  cr_node_num_cores[n-1] ;
+		} else
+			cr_node_cores_offset[0] = 0;
+	}
+
+	/* an extra value is added to get the total number of cores */
+	/* as cr_get_coremap_offset is sometimes used to get the total */
+	/* number of cores in the cluster */
+	cr_node_cores_offset[node_cnt] = cr_node_cores_offset[node_cnt-1] +
+					 cr_node_num_cores[node_cnt-1] ;
+
+}
+
+extern void cr_fini_global_core_data()
+{
+	xfree(cr_node_num_cores);
+	xfree(cr_node_cores_offset);
+}
+
+/* return the coremap index to the first core of the given node */
+
+extern uint32_t cr_get_coremap_offset(uint32_t node_index)
+{
+	xassert(cr_node_cores_offset);
+	return cr_node_cores_offset[node_index];
 }

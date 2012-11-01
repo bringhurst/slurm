@@ -209,6 +209,7 @@ void print_fields(type_t type, void *object)
 			default:
 				break;
 			}
+
 			if (!fuzzy_equal(tmp_dub, NO_VAL))
 				tmp_char = _elapsed_time((long)tmp_dub, 0);
 
@@ -646,6 +647,8 @@ void print_fields(type_t type, void *object)
 				tmp_int = NO_VAL;
 				break;
 			}
+			if (tmp_int == (uint16_t)NO_VAL)
+				tmp_int = NO_VAL;
 			field->print_routine(field,
 					     tmp_int,
 					     (curr_inx == field_count));
@@ -709,6 +712,8 @@ void print_fields(type_t type, void *object)
 				tmp_int = NO_VAL;
 				break;
 			}
+			if (tmp_int == (uint16_t)NO_VAL)
+				tmp_int = NO_VAL;
 			field->print_routine(field,
 					     tmp_int,
 					     (curr_inx == field_count));
@@ -774,6 +779,8 @@ void print_fields(type_t type, void *object)
 				tmp_int = NO_VAL;
 				break;
 			}
+			if (tmp_int == (uint16_t)NO_VAL)
+				tmp_int = NO_VAL;
 			field->print_routine(field,
 					     tmp_int,
 					     (curr_inx == field_count));
@@ -835,6 +842,8 @@ void print_fields(type_t type, void *object)
 				tmp_int = NO_VAL;
 				break;
 			}
+			if (tmp_int == (uint16_t)NO_VAL)
+				tmp_int = NO_VAL;
 			field->print_routine(field,
 					     tmp_int,
 					     (curr_inx == field_count));
@@ -959,9 +968,14 @@ void print_fields(type_t type, void *object)
 
 				break;
 			}
-			if(!g_qos_list)
+			if (!g_qos_list) {
+				slurmdb_qos_cond_t qos_cond;
+				memset(&qos_cond, 0,
+				       sizeof(slurmdb_qos_cond_t));
+				qos_cond.with_deleted = 1;
 				g_qos_list = slurmdb_qos_get(
-					acct_db_conn, NULL);
+					acct_db_conn, &qos_cond);
+			}
 
 			tmp_char = _find_qos_name_from_list(g_qos_list,
 							    tmp_int);

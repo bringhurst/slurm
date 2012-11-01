@@ -43,12 +43,15 @@ print_header $test_id
 if { [test_xcpu] } {
 	send_user "\nWARNING: This test is incompatible with XCPU systems\n"
 	exit 0
-}
-
-# This test just uses options not applicable to cray's aprun
-if {[test_cray]} {
+} elseif {[test_cray]} {
 	send_user "\nWARNING: This test is incompatible with Cray systems\n"
 	exit $exit_code
+}
+
+if {[test_launch_poe]} {
+	set step_id 1
+} else {
+	set step_id 0
 }
 
 #
@@ -85,13 +88,18 @@ set match_run  0
 set match_term 0
 set match_wait 0
 set job_id  0
-set srun_pid [spawn $srun -v -N1 -t1 --unbuffered $file_in]
+set srun_pid [spawn $srun -v -N1 -t1 --unbuffered ./$file_in]
 expect {
-	-re "launching ($number).0" {
+	-re "launching ($number).$step_id" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	-re "srun: task 0: running" {
+		set match_run 1
+		cancel_job $job_id
+		exp_continue
+	}
+	-re "poe:.*tasks started" {
 		set match_run 1
 		cancel_job $job_id
 		exp_continue
@@ -117,7 +125,8 @@ expect {
 	}
 }
 if {[expr $match_run + $match_wait + $match_term] != 3} {
-	send_user "\nFAILURE: srun failed to properly process SIGINT matches was $match_run $match_wait $match_term\n"
+	send_user "\nFAILURE: srun failed to properly process SIGINT, "
+	send_user "($match_run + $match_wait + $match_term != 3)\n"
 	set exit_code 1
 }
 if {$exit_code == 0} {
@@ -135,9 +144,9 @@ set match_run  0
 set match_term 0
 set match_wait 0
 set job_id  0
-set srun_pid [spawn $srun -v -N1 -t1 --unbuffered --quit-on-interrupt $file_in]
+set srun_pid [spawn $srun -v -N1 -t1 --unbuffered --quit-on-interrupt ./$file_in]
 expect {
-	-re "launching ($number).0" {
+	-re "launching ($number).$step_id" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
@@ -150,11 +159,11 @@ expect {
 		set match_run 999
 		exp_continue
 	}
-	-re "srun: task0: running" {
+	-re "srun: task 0: running" {
 		set match_run 999
 		exp_continue
 	}
-	-re "Job step aborted" {
+	-re "srun: sending Ctrl-C" {
 		set match_term 1
 		exp_continue
 	}
@@ -169,7 +178,8 @@ expect {
 }
 cancel_job $job_id
 if {[expr $match_run + $match_wait + $match_term] != 2} {
-	send_user "\nFAILURE: srun failed to properly process SIGINT $match_run $match_wait $match_term\n"
+	send_user "\nFAILURE: srun failed to properly process SIGINT, "
+	send_user "($match_run + $match_wait + $match_term != 2)\n"
 	set exit_code 1
 }
 
