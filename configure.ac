@@ -520,6 +520,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/proctrack/aix/Makefile
 		 src/plugins/proctrack/cgroup/Makefile
 		 src/plugins/proctrack/pgid/Makefile
+		 src/plugins/proctrack/libvirt/Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
 		 src/plugins/proctrack/sgi_job/Makefile
 		 src/plugins/proctrack/lua/Makefile
