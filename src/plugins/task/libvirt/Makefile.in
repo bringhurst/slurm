@@ -61,6 +61,7 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/acx_pthread.m4 \
 	$(top_srcdir)/auxdir/x_ac_gpl_licensed.m4 \
 	$(top_srcdir)/auxdir/x_ac_hwloc.m4 \
 	$(top_srcdir)/auxdir/x_ac_iso.m4 \
+	$(top_srcdir)/auxdir/x_ac_libvirt.m4 \
 	$(top_srcdir)/auxdir/x_ac_lua.m4 \
 	$(top_srcdir)/auxdir/x_ac_man2html.m4 \
 	$(top_srcdir)/auxdir/x_ac_munge.m4 \
@@ -201,6 +202,7 @@ LDFLAGS = @LDFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
+LIBVIRT_LIBS = @LIBVIRT_LIBS@
 LIB_LDFLAGS = @LIB_LDFLAGS@
 LIPO = @LIPO@
 LN_S = @LN_S@
@@ -346,7 +348,7 @@ pkglib_LTLIBRARIES = task_libvirt.la
 # libvirt task plugin.
 task_libvirt_la_SOURCES = task_libvirt.h task_libvirt.c
 task_libvirt_la_CPPFLAGS = $(HWLOC_CPPFLAGS)
-task_libvirt_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS) $(HWLOC_LDFLAGS) $(HWLOC_LIBS)
+task_libvirt_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS) $(LIBVIRT_LIBS)
 all: all-am
 
 .SUFFIXES:
