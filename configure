@@ -701,6 +701,7 @@ PTHREAD_CC
 HAVE_UNSETENV_FALSE
 HAVE_UNSETENV_TRUE
 LIBOBJS
+LIBVIRT_LIBS
 PAM_DIR
 HAVE_PAM_FALSE
 HAVE_PAM_TRUE
@@ -18693,6 +18694,90 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 
 
+
+
+
+   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for virConnectOpen in -lvirt" >&5
+$as_echo_n "checking for virConnectOpen in -lvirt... " >&6; }
+if ${ac_cv_lib_virt_virConnectOpen+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lvirt  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char virConnectOpen ();
+int
+main ()
+{
+return virConnectOpen ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_virt_virConnectOpen=yes
+else
+  ac_cv_lib_virt_virConnectOpen=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_virt_virConnectOpen" >&5
+$as_echo "$ac_cv_lib_virt_virConnectOpen" >&6; }
+if test "x$ac_cv_lib_virt_virConnectOpen" = xyes; then :
+  ac_have_libvirt=yes
+fi
+
+
+
+   if test "$ac_have_libvirt" = "yes"; then
+      LIBVIRT_LIBS="-lvirt"
+      LIBVIRT_HEADER="libvirt/libvirt.h"
+   fi
+
+   if test "$ac_have_libvirt" = "yes"; then
+	save_LIBS="$LIBS"
+	LIBS="$LIBVIRT_LIBS $save_LIBS"
+	cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <${LIBVIRT_HEADER}>
+int
+main ()
+{
+(void)virConnectOpen(0);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+
+else
+  ac_have_libvirt="no"
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+	LIBS="$save_LIBS"
+	if test "$ac_have_libvirt" = "yes"; then
+	    { $as_echo "$as_me:${as_lineno-$LINENO}: result: LIBVIRT test program built properly." >&5
+$as_echo "LIBVIRT test program built properly." >&6; }
+	else
+	    { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: *** LIBVIRT test program execution failed." >&5
+$as_echo "$as_me: WARNING: *** LIBVIRT test program execution failed." >&2;}
+	fi
+   else
+      { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: Can not build libvirt support without library" >&5
+$as_echo "$as_me: WARNING: Can not build libvirt support without library" >&2;}
+      ac_have_libvirt="no"
+   fi
 
 
 

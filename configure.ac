@@ -163,6 +163,10 @@ dnl Check for PAM module support
 X_AC_PAM
 
 dnl
+dnl Check for LIBVIRT module support
+X_AC_LIBVIRT
+
+dnl
 dnl Check for ISO compliance
 X_AC_ISO
 
