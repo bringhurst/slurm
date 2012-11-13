@@ -515,6 +515,12 @@ uint32_t slurm_get_jobcomp_port(void);
  */
 int slurm_set_jobcomp_port(uint32_t port);
 
+/* slurm_get_kill_wait
+ * returns kill_wait from slurmctld_conf object
+ * RET uint16_t        - kill_wait
+ */
+uint16_t slurm_get_kill_wait(void);
+
 /* slurm_get_preempt_type
  * get PreemptType from slurmctld_conf object
  * RET char *   - preempt type, MUST be xfreed by caller
@@ -531,6 +537,19 @@ extern uint16_t slurm_get_propagate_prio_process(void);
  * RET char *   - proctrack type, MUST be xfreed by caller
  */
 char *slurm_get_proctrack_type(void);
+
+/* slurm_get_acct_gather_energy_type
+ * get EnergyAccountingType from slurmctld_conf object
+ * RET char *   - acct_gather_energy type, MUST be xfreed by caller
+ */
+char *slurm_get_acct_gather_energy_type(void);
+
+/* slurm_get_acct_gather_node_freq
+ * returns the accounting poll frequency for requesting info from a
+ * node from the slurmctld_conf object
+ * RET int    - accounting node frequency
+ */
+extern uint16_t slurm_get_acct_gather_node_freq(void);
 
 /* slurm_get_root_filter
  * RET uint16_t  - Value of SchedulerRootFilter */

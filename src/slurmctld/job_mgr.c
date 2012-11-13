@@ -3282,6 +3282,20 @@ static int _part_access_check(struct part_record *part_ptr,
 			      uid_t submit_uid)
 {
 	uint32_t total_nodes;
+	size_t resv_name_leng = 0;
+
+	if (job_desc->reservation != NULL) {
+		resv_name_leng = strlen(job_desc->reservation);
+	}
+
+	if ((part_ptr->flags & PART_FLAG_REQ_RESV) &&
+		((job_desc->reservation == NULL) ||
+		(resv_name_leng == 0))) {
+		info("_part_access_check: uid %u access to partition %s "
+		     "denied, requires reservation",
+		     (unsigned int) submit_uid, part_ptr->name);
+		return ESLURM_ACCESS_DENIED;
+	}
 
 
 	if ((part_ptr->flags & PART_FLAG_REQ_RESV) &&
@@ -4836,9 +4850,6 @@ void job_time_limit(void)
 			    slurmctld_conf.msg_timeout + 1);
 	time_t over_run;
 	int resv_status = 0;
-	uint64_t job_cpu_usage_mins = 0;
-	uint64_t usage_mins;
-	uint32_t wall_mins;
 
 	if (slurmctld_conf.over_time_limit == (uint16_t) INFINITE)
 		over_run = now - (365 * 24 * 60 * 60);	/* one year */
@@ -4848,11 +4859,6 @@ void job_time_limit(void)
 	begin_job_resv_check();
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr =(struct job_record *) list_next(job_iterator))) {
-		slurmdb_qos_rec_t *qos = NULL;
-		slurmdb_association_rec_t *assoc =	NULL;
-		assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK,
-					   READ_LOCK, NO_LOCK, NO_LOCK };
-
 		xassert (job_ptr->magic == JOB_MAGIC);
 
 		if (IS_JOB_CONFIGURING(job_ptr)) {
@@ -4873,13 +4879,6 @@ void job_time_limit(void)
 
 		if (!IS_JOB_RUNNING(job_ptr))
 			continue;
-
-		/* find out how many cpu minutes this job has been
-		 * running for. */
-		job_cpu_usage_mins = (uint64_t)
-			((((now - job_ptr->start_time)
-			   - job_ptr->tot_sus_time) / 60)
-			 * job_ptr->total_cpus);
 
 		if (slurmctld_conf.inactive_limit &&
 		    (job_ptr->batch_flag == 0)    &&
@@ -4932,120 +4931,7 @@ void job_time_limit(void)
 		    (list_count(job_ptr->step_list) > 0))
 			check_job_step_time_limit(job_ptr, now);
 
-		assoc_mgr_lock(&locks);
-		qos = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-		assoc =	(slurmdb_association_rec_t *)job_ptr->assoc_ptr;
-
-		/* The idea here is for qos to trump what an association
-		 * has set for a limit, so if an association set of
-		 * wall 10 mins and the qos has 20 mins set and the
-		 * job has been running for 11 minutes it continues
-		 * until 20.
-		 */
-		if(qos) {
-			usage_mins = (uint64_t)(qos->usage->usage_raw / 60.0);
-			wall_mins = qos->usage->grp_used_wall / 60;
-
-			if ((qos->grp_cpu_mins != (uint64_t)INFINITE)
-			    && (usage_mins >= qos->grp_cpu_mins)) {
-				last_job_update = now;
-				info("Job %u timed out, "
-				     "the job is at or exceeds QOS %s's "
-				     "group max cpu minutes of %"PRIu64" "
-				     "with %"PRIu64"",
-				     job_ptr->job_id,
-				     qos->name,
-				     qos->grp_cpu_mins,
-				     usage_mins);
-				job_ptr->state_reason = FAIL_TIMEOUT;
-				goto job_failed;
-			}
-
-			if ((qos->grp_wall != INFINITE)
-			    && (wall_mins >= qos->grp_wall)) {
-				last_job_update = now;
-				info("Job %u timed out, "
-				     "the job is at or exceeds QOS %s's "
-				     "group wall limit of %u with %u",
-				     job_ptr->job_id,
-				     qos->name, qos->grp_wall,
-				     wall_mins);
-				job_ptr->state_reason = FAIL_TIMEOUT;
-				goto job_failed;
-			}
-
-			if ((qos->max_cpu_mins_pj != (uint64_t)INFINITE)
-			    && (job_cpu_usage_mins >= qos->max_cpu_mins_pj)) {
-				last_job_update = now;
-				info("Job %u timed out, "
-				     "the job is at or exceeds QOS %s's "
-				     "max cpu minutes of %"PRIu64" "
-				     "with %"PRIu64"",
-				     job_ptr->job_id,
-				     qos->name,
-				     qos->max_cpu_mins_pj,
-				     job_cpu_usage_mins);
-				job_ptr->state_reason = FAIL_TIMEOUT;
-				goto job_failed;
-			}
-		}
-
-		/* handle any association stuff here */
-		while(assoc) {
-			usage_mins = (uint64_t)(assoc->usage->usage_raw / 60.0);
-			wall_mins = assoc->usage->grp_used_wall / 60;
-
-			if ((qos && (qos->grp_cpu_mins == INFINITE))
-			    && (assoc->grp_cpu_mins != (uint64_t)INFINITE)
-			    && (usage_mins >= assoc->grp_cpu_mins)) {
-				info("Job %u timed out, "
-				     "assoc %u is at or exceeds "
-				     "group max cpu minutes limit %"PRIu64" "
-				     "with %"PRIu64" for account %s",
-				     job_ptr->job_id, assoc->id,
-				     assoc->grp_cpu_mins,
-				     usage_mins,
-				     assoc->acct);
-				job_ptr->state_reason = FAIL_TIMEOUT;
-				break;
-			}
-
-			if ((qos && (qos->grp_wall == INFINITE))
-			    && (assoc->grp_wall != INFINITE)
-			    && (wall_mins >= assoc->grp_wall)) {
-				info("Job %u timed out, "
-				     "assoc %u is at or exceeds "
-				     "group wall limit %u "
-				     "with %u for account %s",
-				     job_ptr->job_id, assoc->id,
-				     assoc->grp_wall,
-				     wall_mins, assoc->acct);
-				job_ptr->state_reason = FAIL_TIMEOUT;
-				break;
-			}
-
-			if ((qos && (qos->max_cpu_mins_pj == INFINITE))
-			    && (assoc->max_cpu_mins_pj != (uint64_t)INFINITE)
-			    && (job_cpu_usage_mins >= assoc->max_cpu_mins_pj)) {
-				info("Job %u timed out, "
-				     "assoc %u is at or exceeds "
-				     "max cpu minutes limit %"PRIu64" "
-				     "with %"PRIu64" for account %s",
-				     job_ptr->job_id, assoc->id,
-				     assoc->max_cpu_mins_pj,
-				     job_cpu_usage_mins,
-				     assoc->acct);
-				job_ptr->state_reason = FAIL_TIMEOUT;
-				break;
-			}
-
-			assoc = assoc->usage->parent_assoc_ptr;
-			/* these limits don't apply to the root assoc */
-			if(assoc == assoc_mgr_root_assoc)
-				break;
-		}
-	job_failed:
-		assoc_mgr_unlock(&locks);
+		acct_policy_job_time_out(job_ptr);
 
 		if(job_ptr->state_reason == FAIL_TIMEOUT) {
 			last_job_update = now;
@@ -7947,6 +7833,8 @@ validate_jobs_on_node(slurm_node_registration_status_msg_t *reg_msg)
 		return;
 	}
 
+	memcpy(node_ptr->energy, reg_msg->energy, sizeof(acct_gather_energy_t));
+
 	if (node_ptr->up_time > reg_msg->up_time) {
 		verbose("Node %s rebooted %u secs ago",
 			reg_msg->node_name, reg_msg->up_time);
@@ -8798,21 +8686,22 @@ static void _signal_job(struct job_record *job_ptr, int signal)
 #if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
 	static int notify_srun = 1;
 #else
+	static int notify_srun_static = -1;
 	int notify_srun = 0;
-	static int launch_poe = -1;
 
-	if (launch_poe == -1) {
+	if (notify_srun_static == -1) {
 		char *launch_type = slurm_get_launch_type();
-		if (!strcmp(launch_type, "launch/poe"))
-			launch_poe = 1;
+		if (!strcmp(launch_type, "launch/aprun") ||
+		    !strcmp(launch_type, "launch/poe"))
+			notify_srun_static = 1;
 		else
-			launch_poe = 0;
+			notify_srun_static = 0;
 		xfree(launch_type);
 	}
-	/* For launch/poe all signals are forwarded by by srun to poe to tasks
+	/* For launch/poe all signals are forwarded by srun to poe to tasks
 	 * except SIGSTOP/SIGCONT, which are used for job preemption. In that
 	 * case the slurmd must directly suspend tasks and switch resources. */
-	if (launch_poe && (signal != SIGSTOP) && (signal != SIGCONT))
+	if (notify_srun_static && (signal != SIGSTOP) && (signal != SIGCONT))
 		notify_srun = 1;
 #endif
 

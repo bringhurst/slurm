@@ -249,19 +249,17 @@ extern int launch_p_setup_srun_opt(char **rest)
 		 * handled after the allocation. */
 
 		/* Default location of the actual command to be ran. We always
-		 * have to add 3 options (calling prog, '--env-all' and ':') no
-		 * matter what. */
-		command_pos = 3;
+		 * have to add 5 options (calling prog, '-p', '--np',
+		 * '--env-all' and ':') no matter what. */
+		command_pos = 7;
 
-		if (opt.ntasks_per_node != NO_VAL)
-			command_pos += 2;
-		if (opt.ntasks_set)
-			command_pos += 2;
 		if (opt.cwd_set)
 			command_pos += 2;
 		if (opt.labelio)
 			command_pos += 2;
 		if (_verbose)
+			command_pos += 2;
+		if (opt.quiet)
 			command_pos += 2;
 		if (opt.ifname) {
 			if (!parse_uint32(opt.ifname, &taskid)
@@ -269,9 +267,9 @@ extern int launch_p_setup_srun_opt(char **rest)
 				command_pos += 2;
 			}
 		}
-		if (opt.runjob_opts) {
+		if (opt.launch_opts) {
 			char *save_ptr = NULL, *tok;
-			char *tmp = xstrdup(opt.runjob_opts);
+			char *tmp = xstrdup(opt.launch_opts);
 			tok = strtok_r(tmp, " ", &save_ptr);
 			while (tok) {
 				command_pos++;
@@ -296,16 +294,16 @@ extern int launch_p_setup_srun_opt(char **rest)
 		*/
 		opt.argv[i++] = xstrdup("srun");
 		/* srun launches tasks using runjob API. Slurmd is not used */
-		if (opt.ntasks_per_node != NO_VAL) {
-			opt.argv[i++]  = xstrdup("-p");
-			opt.argv[i++]  = xstrdup_printf("%d",
-							opt.ntasks_per_node);
-		}
+		/* We are always going to set ntasks_per_node and ntasks */
+		// if (opt.ntasks_per_node != NO_VAL) {
+		opt.argv[i++]  = xstrdup("-p");
+		opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks_per_node);
+		// }
 
-		if (opt.ntasks_set) {
-			opt.argv[i++]  = xstrdup("--np");
-			opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks);
-		}
+		// if (opt.ntasks_set) {
+		opt.argv[i++]  = xstrdup("--np");
+		opt.argv[i++]  = xstrdup_printf("%d", opt.ntasks);
+		// }
 
 		if (opt.cwd_set) {
 			opt.argv[i++]  = xstrdup("--cwd");
@@ -321,6 +319,11 @@ extern int launch_p_setup_srun_opt(char **rest)
 			opt.labelio = 0;
 		}
 
+		if (opt.quiet) {
+			opt.argv[i++]  = xstrdup("--verbose");
+			opt.argv[i++]  = xstrdup("OFF");
+		}
+
 		if (_verbose) {
 			opt.argv[i++]  = xstrdup("--verbose");
 			opt.argv[i++]  = xstrdup_printf("%d", _verbose);
@@ -331,9 +334,9 @@ extern int launch_p_setup_srun_opt(char **rest)
 			opt.argv[i++]  = xstrdup_printf("%u", taskid);
 		}
 
-		if (opt.runjob_opts) {
+		if (opt.launcher_opts) {
 			char *save_ptr = NULL, *tok;
-			char *tmp = xstrdup(opt.runjob_opts);
+			char *tmp = xstrdup(opt.launcher_opts);
 			tok = strtok_r(tmp, " ", &save_ptr);
 			while (tok) {
 				opt.argv[i++]  = xstrdup(tok);
@@ -377,6 +380,16 @@ extern int launch_p_create_job_step(srun_job_t *job, bool use_all_cpus,
 				    void (*signal_function)(int),
 				    sig_atomic_t *destroy_job)
 {
+	if (opt.launch_cmd) {
+		int i = 0;
+		char *cmd_line = NULL;
+
+		while (opt.argv[i])
+			xstrfmtcat(cmd_line, "%s ", opt.argv[i++]);
+		printf("%s\n", cmd_line);
+		xfree(cmd_line);
+		exit(0);
+	}
 	return launch_common_create_job_step(job, use_all_cpus,
 					     signal_function,
 					     destroy_job);

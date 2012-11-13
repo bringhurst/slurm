@@ -76,6 +76,7 @@ extern char *default_plugstack;
 #define DEFAULT_JOB_ACCT_GATHER_TYPE  "jobacct_gather/none"
 #define JOB_ACCT_GATHER_TYPE_NONE "jobacct_gather/none"
 #define DEFAULT_JOB_ACCT_GATHER_FREQ  30
+#define DEFAULT_ACCT_GATHER_ENERGY_TYPE "acct_gather_energy/none"
 #define ACCOUNTING_STORAGE_TYPE_NONE "accounting_storage/none"
 #define DEFAULT_DISABLE_ROOT_JOBS   0
 #define DEFAULT_ENFORCE_PART_LIMITS 0
@@ -89,6 +90,10 @@ extern char *default_plugstack;
 
 #if defined HAVE_BG_FILES && !defined HAVE_BG_L_P
 #  define DEFAULT_LAUNCH_TYPE         "launch/runjob"
+#elif defined HAVE_LIBNRT
+#  define DEFAULT_LAUNCH_TYPE         "launch/poe"
+#elif defined HAVE_REAL_CRAY
+#  define DEFAULT_LAUNCH_TYPE         "launch/aprun"
 #else
 #  define DEFAULT_LAUNCH_TYPE         "launch/slurm"
 #endif

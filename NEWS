@@ -1,8 +1,11 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
-* Changes in SLURM 2.5.0.pre4
-=============================
+* Changes in SLURM 2.5.0
+========================
+
+* Changes in SLURM 2.5.0.rc1
+============================
  -- Added Prolog and Epilog Guide (web page). Based upon work by Jason Sollom,
     Cray Inc. and used by permission.
  -- Restore gang scheduling functionality. Preemptor was not being scheduled.
@@ -29,6 +32,17 @@ documents those changes that are of interest to users and admins.
  -- Add AccountingStorageEnforce=safe option to provide method to avoid jobs
     launching that wouldn't be able to run to completion because of a
     GrpCPUMins limit.
+ -- Add support for RFC 5424 timestamps in logfiles. Disable with configuration
+    option of "--disable-rfc5424time". By Janne Blomqvist, Aalto University.
+ -- CRAY - Replace srun.pl with launch/aprun plugin to use srun to wrap the
+    aprun process instead of a perl script.
+ -- srun - Rename --runjob-opts to --launcher-opts to be used on systems other
+    than BGQ.
+ -- Added new DebugFlags - Energy for AcctGatherEnergy plugins.
+ -- start deprecation of sacct --dump --fdump
+ -- BGQ - added --verbose=OFF when srun --quiet is used
+ -- Added acct_gather_energy/rapl plugin to record power consumption by job.
+    Work by Yiannis Georgiou, Martin Perry, et. al., Bull
 
 * Changes in SLURM 2.5.0.pre3
 =============================
@@ -68,6 +82,8 @@ documents those changes that are of interest to users and admins.
     frequency and thus it's power consumption. NOTE: cpu frequency is not
     currently preserved for jobs being suspended and later resumed. Work by
     Don Albert, Bull.
+ -- Add node configuration information about "boards" and optimize task
+    placement on minimum number of boards. Work by Rod Schultz, Bull.
 
 * Changes in SLURM 2.5.0.pre1
 =============================
@@ -82,6 +98,14 @@ documents those changes that are of interest to users and admins.
     jobs).
  -- Restructure of srun code to allow outside programs to utilize existing
     logic.
+
+* Changes in SLURM 2.4.5
+========================
+ -- Cray - On job kill requeust, send SIGCONT, SIGTERM, wait KillWait and send
+    SIGKILL. Previously just sent SIGKILL to tasks.
+ -- BGQ - Fix issue when running srun outside of an allocation and only
+    specifying the number of tasks and not the number of nodes.
+ -- BGQ - validate correct ntasks_per_node
 
 * Changes in SLURM 2.4.4
 ========================
@@ -104,7 +128,6 @@ documents those changes that are of interest to users and admins.
  -- Fix for older < glibc 2.4 systems to use euidaccess() instead of eaccess().
  -- BLUEGENE - Do not alter a pending job's node count when changing it's
     partition.
- -- Fix for older < glibc 2.4 systems to use euidaccess instead of eaccess.
  -- BGQ - Add functionality to make it so we track the actions on a block.
     This is needed for when a free request is added to a block but there are
     jobs finishing up so we don't start new jobs on the block since they will

@@ -350,7 +350,8 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 	static int notify_srun = -1;
 	if (notify_srun == -1) {
 		char *launch_type = slurm_get_launch_type();
-		if (!strcmp(launch_type, "launch/poe")) {
+		if (!strcmp(launch_type, "launch/aprun") ||
+		    !strcmp(launch_type, "launch/poe")) {
 			notify_srun = 1;
 			notify_slurmd = false;
 		} else
@@ -390,9 +391,9 @@ int job_step_signal(uint32_t job_id, uint32_t step_id,
 	}
 
 	/* If SIG_NODE_FAIL codes through it means we had nodes failed
-	   so handle that in the select plugin and switch the signal
-	   to KILL afterwards.
-	*/
+	 * so handle that in the select plugin and switch the signal
+	 * to KILL afterwards.
+	 */
 	if (signal == SIG_NODE_FAIL) {
 		select_g_fail_cnode(step_ptr);
 		signal = SIGKILL;
@@ -2691,9 +2692,8 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 			*max_rc = step_ptr->exit_code;
 		jobacctinfo_aggregate(step_ptr->jobacct, req->jobacct);
 		/* we don't want to delete the step record here since
-		   right after we delete this step again if we delete
-		   it here we won't find it when we try the second
-		   time */
+		 * right after we delete this step again if we delete
+		 * it here we won't find it when we try the second time */
 		//delete_step_record(job_ptr, req->job_step_id);
 		return SLURM_SUCCESS;
 	}
@@ -2705,6 +2705,12 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid,
 	}
 
 	jobacctinfo_aggregate(step_ptr->jobacct, req->jobacct);
+
+	/* we have been adding task average frequencies for
+	 * jobacct->act_cpufreq so we need to divide with the
+	 * total number of tasks/cpus for the step average frequency */
+	if (step_ptr->cpu_count && step_ptr->jobacct)
+		step_ptr->jobacct->act_cpufreq /= step_ptr->cpu_count;
 
 	if (!step_ptr->exit_node_bitmap) {
 		/* initialize the node bitmap for exited nodes */

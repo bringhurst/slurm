@@ -1951,7 +1951,7 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 	}
 	if ((resv_ptr->users == NULL) && (resv_ptr->accounts == NULL)) {
 		info("Reservation request lacks users or accounts");
-		error_code = ESLURM_INVALID_ACCOUNT;
+		error_code = ESLURM_RESERVATION_EMPTY;
 		goto update_failure;
 	}
 
@@ -2114,7 +2114,7 @@ update_failure:
 	if (!iter)
 		fatal("list_iterator_create: malloc failure");
 	while ((resv_next = (slurmctld_resv_t *) list_next(iter))) {
-		if (strcmp(resv_next->name, resv_desc_ptr->name) == 0) {
+		if (resv_next == resv_ptr) {
 			list_delete_item(iter);
 			break;
 		}
@@ -3124,6 +3124,7 @@ static void _check_job_compatibility(struct job_record *job_ptr,
 			bit_clear(full_node_bitmap, node_bitmap_inx);
 		}
 	}
+	FREE_NULL_BITMAP(full_node_bitmap);
 }
 
 static bitstr_t *_pick_idle_node_cnt(bitstr_t *avail_bitmap,

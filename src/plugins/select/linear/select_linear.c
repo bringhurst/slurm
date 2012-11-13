@@ -498,8 +498,9 @@ static uint16_t _get_avail_cpus(struct job_record *job_ptr, int index)
 	info("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
 	     node_ptr->name, cpus, boards, sockets, cores, threads);
 #else
-	debug("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
-	      node_ptr->name, cpus, boards, sockets, cores, threads);
+	/* Largely to avoid warning about unused variable "boards" */
+	debug2("host %s HW_ cpus %u boards %u sockets %u cores %u threads %u ",
+	       node_ptr->name, cpus, boards, sockets, cores, threads);
 #endif
 
 	avail_cpus = slurm_get_avail_procs(
@@ -2628,7 +2629,7 @@ static int  _cr_job_list_sort(void *x, void *y)
 {
 	struct job_record *job1_ptr = (struct job_record *) x;
 	struct job_record *job2_ptr = (struct job_record *) y;
-	return (int) difftime(job1_ptr->end_time, job2_ptr->end_time);
+	return (int) SLURM_DIFFTIME(job1_ptr->end_time, job2_ptr->end_time);
 }
 
 /*

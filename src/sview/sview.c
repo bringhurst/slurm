@@ -294,7 +294,8 @@ static void _page_switched(GtkNotebook     *notebook,
 		return;
 	else if (!grid_init && !started_grid_init) {
 		/* start the thread to make the grid only once */
-		if (!g_thread_create(_grid_init_thr, notebook, FALSE, &error)) {
+		if (!sview_thread_new(
+			    _grid_init_thr, notebook, FALSE, &error)) {
 			g_printerr ("Failed to create grid init thread: %s\n",
 				    error->message);
 			return;
@@ -327,7 +328,7 @@ static void _page_switched(GtkNotebook     *notebook,
 		page_thr->page_num = i;
 		page_thr->table = table;
 
-		if (!g_thread_create(_page_thr, page_thr, FALSE, &error)) {
+		if (!sview_thread_new(_page_thr, page_thr, FALSE, &error)) {
 			g_printerr ("Failed to create page thread: %s\n",
 				    error->message);
 			return;
@@ -560,6 +561,14 @@ static void _get_current_debug_flags(GtkToggleAction *action)
 		gtk_toggle_action_set_active(toggle_action, new_state);
 
 	debug_action = gtk_action_group_get_action(menu_action_group,
+						  "flags_energy");
+	toggle_action = GTK_TOGGLE_ACTION(debug_action);
+	orig_state = gtk_toggle_action_get_active(toggle_action);
+	new_state = debug_flags & DEBUG_FLAG_ENERGY;
+	if (orig_state != new_state)
+		gtk_toggle_action_set_active(toggle_action, new_state);
+
+	debug_action = gtk_action_group_get_action(menu_action_group,
 						  "flags_front_end");
 	toggle_action = GTK_TOGGLE_ACTION(debug_action);
 	orig_state = gtk_toggle_action_get_active(toggle_action);
@@ -722,6 +731,10 @@ static void _set_flags_bg_wires(GtkToggleAction *action)
 static void _set_flags_cpu_bind(GtkToggleAction *action)
 {
 	_set_flags(action, DEBUG_FLAG_CPU_BIND);
+}
+static void _set_flags_energy(GtkToggleAction *action)
+{
+	_set_flags(action, DEBUG_FLAG_ENERGY);
 }
 static void _set_flags_front_end(GtkToggleAction *action)
 {
@@ -894,6 +907,7 @@ static char *_get_ui_description()
 		"        <menuitem action='flags_bg_pick'/>"
 		"        <menuitem action='flags_bg_wires'/>"
 		"        <menuitem action='flags_cpu_bind'/>"
+		"        <menuitem action='flags_energy'/>"
 		"        <menuitem action='flags_front_end'/>"
 		"        <menuitem action='flags_gang'/>"
 		"        <menuitem action='flags_gres'/>"
@@ -1129,6 +1143,8 @@ static GtkWidget *_get_menubar_menu(GtkWidget *window, GtkWidget *notebook)
 		 "BgBlockWires", G_CALLBACK(_set_flags_bg_wires), FALSE},
 		{"flags_cpu_bind", NULL, "CPU Bind", NULL,
 		 "CPU_Bind", G_CALLBACK(_set_flags_cpu_bind), FALSE},
+		{"flags_energy", NULL, "Energy", NULL,
+		 "Energy", G_CALLBACK(_set_flags_energy), FALSE},
 		{"flags_front_end", NULL, "FrontEnd", NULL,
 		 "FrontEnd", G_CALLBACK(_set_flags_front_end), FALSE},
 		{"flags_gang", NULL, "Gang", NULL,
@@ -1671,13 +1687,13 @@ int main(int argc, char *argv[])
 	cluster_dims = slurmdb_setup_cluster_dims();
 
 	_init_pages();
-	g_thread_init(NULL);
+	sview_thread_init(NULL);
 	gdk_threads_init();
 	gdk_threads_enter();
 	/* Initialize GTK */
 	gtk_init (&argc, &argv);
-	grid_mutex = g_mutex_new();
-	grid_cond = g_cond_new();
+	sview_mutex_new(&grid_mutex);
+	sview_cond_new(&grid_cond);
 	/* make sure the system is up */
 	grid_window = GTK_WIDGET(create_scrolled_window());
 	bin = GTK_BIN(&GTK_SCROLLED_WINDOW(grid_window)->container);

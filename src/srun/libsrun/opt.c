@@ -185,7 +185,7 @@
 #define LONG_OPT_GRES            0x151
 #define LONG_OPT_ALPS            0x152
 #define LONG_OPT_REQ_SWITCH      0x153
-#define LONG_OPT_RUNJOB_OPTS     0x154
+#define LONG_OPT_LAUNCHER_OPTS   0x154
 #define LONG_OPT_CPU_FREQ        0x155
 #define LONG_OPT_LAUNCH_CMD      0x156
 
@@ -463,7 +463,7 @@ static void _opt_default()
 	opt.wckey = NULL;
 	opt.req_switch = -1;
 	opt.wait4switch = -1;
-	opt.runjob_opts = NULL;
+	opt.launcher_opts = NULL;
 	opt.launch_cmd = false;
 }
 
@@ -812,6 +812,7 @@ static void set_options(const int argc, char **argv)
 		{"jobid",            required_argument, 0, LONG_OPT_JOBID},
 		{"linux-image",      required_argument, 0, LONG_OPT_LINUX_IMAGE},
 		{"launch-cmd",       no_argument,       0, LONG_OPT_LAUNCH_CMD},
+		{"launcher-opts",      required_argument, 0, LONG_OPT_LAUNCHER_OPTS},
 		{"mail-type",        required_argument, 0, LONG_OPT_MAIL_TYPE},
 		{"mail-user",        required_argument, 0, LONG_OPT_MAIL_USER},
 		{"max-exit-timeout", required_argument, 0, LONG_OPT_XTO},
@@ -842,7 +843,7 @@ static void set_options(const int argc, char **argv)
 		{"reservation",      required_argument, 0, LONG_OPT_RESERVATION},
 		{"restart-dir",      required_argument, 0, LONG_OPT_RESTART_DIR},
 		{"resv-ports",       optional_argument, 0, LONG_OPT_RESV_PORTS},
-		{"runjob-opts",      required_argument, 0, LONG_OPT_RUNJOB_OPTS},
+		{"runjob-opts",      required_argument, 0, LONG_OPT_LAUNCHER_OPTS},
 		{"signal",	     required_argument, 0, LONG_OPT_SIGNAL},
 		{"slurmd-debug",     required_argument, 0, LONG_OPT_DEBUG_SLURMD},
 		{"sockets-per-node", required_argument, 0, LONG_OPT_SOCKETSPERNODE},
@@ -1465,9 +1466,9 @@ static void set_options(const int argc, char **argv)
 			xfree(opt.reservation);
 			opt.reservation = xstrdup(optarg);
 			break;
-		case LONG_OPT_RUNJOB_OPTS:
-			xfree(opt.runjob_opts);
-			opt.runjob_opts = xstrdup(optarg);
+		case LONG_OPT_LAUNCHER_OPTS:
+			xfree(opt.launcher_opts);
+			opt.launcher_opts = xstrdup(optarg);
 			break;
 		case LONG_OPT_CHECKPOINT_DIR:
 			xfree(opt.ckpt_dir);
@@ -1529,6 +1530,113 @@ static bool _check_is_pow_of_2(int32_t n) {
 	 */
 	return ((n!=0) && (n&(-n))==n);
 }
+
+extern void bg_figure_nodes_tasks()
+{
+	/* A bit of setup for IBM's runjob.  runjob only has so many
+	   options, so it isn't that bad.
+	*/
+	int32_t node_cnt;
+	if (opt.max_nodes)
+		node_cnt = opt.max_nodes;
+	else
+		node_cnt = opt.min_nodes;
+
+	if (!opt.ntasks_set) {
+		if (opt.ntasks_per_node != NO_VAL)
+			opt.ntasks = node_cnt * opt.ntasks_per_node;
+		else {
+			opt.ntasks = node_cnt;
+			opt.ntasks_per_node = 1;
+		}
+		opt.ntasks_set = true;
+	} else {
+		int32_t ntpn;
+		bool figured = false;
+
+		if (opt.nodes_set) {
+			if (node_cnt > opt.ntasks) {
+				if (opt.nodes_set_opt)
+					info("You asked for %d nodes, "
+					     "but only %d tasks, resetting "
+					     "node count to %u.",
+					     node_cnt, opt.ntasks, opt.ntasks);
+				opt.max_nodes = opt.min_nodes = node_cnt
+					= opt.ntasks;
+			}
+		}
+		/* If nodes not set do not try to set min/max nodes
+		   yet since that would result in an incorrect
+		   allocation.  For a step allocation it is figured
+		   out later in srun_job.c _job_create_structure().
+		*/
+
+		if (!opt.ntasks_per_node || (opt.ntasks_per_node == NO_VAL)) {
+			/* We always want the next larger number if
+			   there is a fraction so we try to stay in
+			   the allocation requested.
+			*/
+			opt.ntasks_per_node =
+				(opt.ntasks + node_cnt - 1) / node_cnt;
+			figured = true;
+		}
+
+		/* On a Q we need ntasks_per_node to be a multiple of 2 */
+		ntpn = opt.ntasks_per_node;
+		while (!_check_is_pow_of_2(ntpn))
+			ntpn++;
+		if (!figured && (ntpn != opt.ntasks_per_node)) {
+			info("You requested --ntasks-per-node=%d, which is not "
+			     "a power of 2.  Setting --ntasks-per-node=%d "
+			     "for you.", opt.ntasks_per_node, ntpn);
+			figured = true;
+		}
+		opt.ntasks_per_node = ntpn;
+
+		ntpn = opt.ntasks / opt.ntasks_per_node;
+		/* Make sure we are requesting the correct number of nodes. */
+		if (node_cnt < ntpn) {
+			opt.max_nodes = opt.min_nodes = ntpn;
+			if (opt.nodes_set && !figured) {
+				fatal("You requested -N %d and -n %d "
+				      "with --ntasks-per-node=%d.  "
+				      "This isn't a valid request.",
+				      node_cnt, opt.ntasks,
+				      opt.ntasks_per_node);
+			}
+			node_cnt = opt.max_nodes;
+		}
+
+		/* Do this again to make sure we have a legitimate
+		   ratio. */
+		ntpn = opt.ntasks_per_node;
+		if ((node_cnt * ntpn) < opt.ntasks) {
+			ntpn++;
+			while (!_check_is_pow_of_2(ntpn))
+				ntpn++;
+			if (!figured && (ntpn != opt.ntasks_per_node))
+				info("You requested --ntasks-per-node=%d, "
+				     "which cannot spread across %d nodes "
+				     "correctly.  Setting --ntasks-per-node=%d "
+				     "for you.",
+				     opt.ntasks_per_node, node_cnt, ntpn);
+			opt.ntasks_per_node = ntpn;
+		}
+
+		if (opt.nodes_set && (opt.ntasks_per_node != 1)
+		    && (opt.ntasks_per_node != 2)
+		    && (opt.ntasks_per_node != 4)
+		    && (opt.ntasks_per_node != 8)
+		    && (opt.ntasks_per_node != 16)
+		    && (opt.ntasks_per_node != 32))
+			fatal("You requested -N %d and -n %d "
+			      "which gives --ntasks-per-node=%d.  "
+			      "This isn't a valid request.",
+			      node_cnt, opt.ntasks,
+			      opt.ntasks_per_node);
+	}
+}
+
 #endif
 
 /*
@@ -1601,91 +1709,11 @@ static void _opt_args(int argc, char **argv)
 			opt.argc++;
 	}
 
+#if defined HAVE_BG && !defined HAVE_BG_L_P
 	/* Since this is needed on an emulated system don't put this code in
 	 * the launch plugin.
 	 */
-#if defined HAVE_BG && !defined HAVE_BG_L_P
-	int32_t node_cnt;
-	if (opt.max_nodes)
-		node_cnt = opt.max_nodes;
-	else
-		node_cnt = opt.min_nodes;
-
-	if (!opt.ntasks_set) {
-		if (opt.ntasks_per_node != NO_VAL)
-			opt.ntasks = node_cnt * opt.ntasks_per_node;
-		else
-			opt.ntasks = node_cnt;
-		opt.ntasks_set = true;
-	} else {
-		int32_t ntpn;
-		bool figured = false;
-
-		if (opt.nodes_set) {
-			if (node_cnt > opt.ntasks) {
-				if (opt.nodes_set_opt)
-					info("You asked for %d nodes, "
-					     "but only %d tasks, resetting "
-					     "node count to %u.",
-					     node_cnt, opt.ntasks, opt.ntasks);
-				opt.max_nodes = opt.min_nodes = node_cnt
-					= opt.ntasks;
-			}
-		}
-
-		if (!opt.ntasks_per_node || (opt.ntasks_per_node == NO_VAL)) {
-			/* We always want the next larger number if
-			   there is a fraction so we try to stay in
-			   the allocation requested.
-			*/
-			opt.ntasks_per_node =
-				(opt.ntasks + node_cnt - 1) / node_cnt;
-			figured = true;
-		}
-
-		/* On a Q we need ntasks_per_node to be a multiple of 2 */
-		ntpn = opt.ntasks_per_node;
-		while (!_check_is_pow_of_2(ntpn))
-			ntpn++;
-		if (!figured && (ntpn != opt.ntasks_per_node)) {
-			info("You requested --ntasks-per-node=%d, which is not "
-			     "a power of 2.  Setting --ntasks-per-node=%d "
-			     "for you.", opt.ntasks_per_node, ntpn);
-			figured = true;
-		}
-		opt.ntasks_per_node = ntpn;
-
-		ntpn = opt.ntasks / opt.ntasks_per_node;
-		/* Make sure we are requesting the correct number of nodes. */
-		if (node_cnt < ntpn) {
-			opt.max_nodes = opt.min_nodes = ntpn;
-			if (opt.nodes_set && !figured) {
-				fatal("You requested -N %d and -n %d "
-				      "with --ntasks-per-node=%d.  "
-				      "This isn't a valid request.",
-				      node_cnt, opt.ntasks,
-				      opt.ntasks_per_node);
-			}
-			node_cnt = opt.max_nodes;
-		}
-
-		/* Do this again to make sure we have a legitimate
-		   ratio. */
-		ntpn = opt.ntasks_per_node;
-		if ((node_cnt * ntpn) < opt.ntasks) {
-			ntpn++;
-			while (!_check_is_pow_of_2(ntpn))
-				ntpn++;
-			if (!figured && (ntpn != opt.ntasks_per_node))
-				info("You requested --ntasks-per-node=%d, "
-				     "which cannot spread across %d nodes "
-				     "correctly.  Setting --ntasks-per-node=%d "
-				     "for you.",
-				     opt.ntasks_per_node, node_cnt, ntpn);
-			opt.ntasks_per_node = ntpn;
-		}
-	}
-
+	bg_figure_nodes_tasks();
 #endif
 
 	command_pos = launch_g_setup_srun_opt(rest);
@@ -2413,6 +2441,7 @@ static void _usage(void)
 "            [--restart-dir=dir] [--qos=qos] [--time-min=minutes]\n"
 "            [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "            [--mpi=type] [--account=name] [--dependency=type:jobid]\n"
+"            [--launch-cmd] [--launcher-opts=options]\n"
 "            [--kill-on-bad-exit] [--propagate[=rlimits] [--comment=name]\n"
 "            [--cpu_bind=...] [--mem_bind=...] [--network=type]\n"
 "            [--ntasks-per-node=n] [--ntasks-per-socket=n] [reservation=name]\n"
@@ -2430,9 +2459,6 @@ static void _usage(void)
 #else
 "            [--cnload-image=path]\n"
 "            [--mloader-image=path] [--ioload-image=path]\n"
-#endif
-#ifdef HAVE_BGQ
-"            [--runjob-opts=options]\n"
 #endif
 #endif
 "            [--mail-type=type] [--mail-user=user] [--nice[=value]]\n"
@@ -2476,6 +2502,8 @@ static void _help(void)
 "                              non-zero exit code\n"
 "  -l, --label                 prepend task number to lines of stdout/err\n"
 "  -L, --licenses=names        required license, comma separated\n"
+"      --launch-cmd            print external launcher command line if not SLURM\n"
+"      --launcher-opts=        options for the external launcher command if not SLURM\n"
 "  -m, --distribution=type     distribution method for processes to nodes\n"
 "                              (type = block|cyclic|arbitrary)\n"
 "      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
@@ -2566,7 +2594,6 @@ static void _help(void)
 #if defined HAVE_AIX || defined HAVE_LIBNRT /* IBM PE specific options */
 "PE related options:\n"
 "      --network=type          communication protocol to be used\n"
-"      --launch-cmd            print external launcher command line if not SLURM\n"
 "\n"
 #endif
 #ifdef HAVE_BG				/* Blue gene specific options */
@@ -2595,9 +2622,6 @@ static void _help(void)
 "      --linux-image=path      path to linux image for bluegene block.  Default if not set\n"
 "      --mloader-image=path    path to mloader image for bluegene block.  Default if not set\n"
 "      --ramdisk-image=path    path to ramdisk image for bluegene block.  Default if not set\n"
-#endif
-#ifdef HAVE_BGQ
-"      --runjob-opts=options   options for the runjob command\n"
 #endif
 #endif
 "\n"

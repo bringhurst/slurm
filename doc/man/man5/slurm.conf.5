@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "August 2012" "slurm.conf 2.5" "Slurm configuration file"
+.TH "slurm.conf" "8" "November 2012" "slurm.conf 2.5" "Slurm configuration file"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -143,6 +143,40 @@ Also see \fBDefaultStorageUser\fR.
 If set to "YES" then include the job's comment field in the job
 complete message sent to the Accounting Storage database.  The default
 is "YES".
+
+.TP
+\fBAcctGatherNodeFreq\fR
+The AcctGather plugins sampling interval for node accounting.
+For AcctGather plugin values of none, this parameter is ignored.
+For all other values this parameter is the number 
+of seconds between node accounting samples. For the
+acct_gather_energy/rapl plugin, set a value less
+than 300 because the counters may overflow beyond this rate.
+The default value is zero. This value disables accounting sampling
+for nodes. Note: The accounting sampling interval for jobs is
+determined by the value of \fBJobAcctGatherFrequency\fR.
+
+.TP
+\fBAcctGatherEnergyType\fR
+Identifies the plugin to be used for energy consumption accounting.
+The jobacct_gather plugin and slurmd daemon call this plugin to collect
+energy consumption data for jobs and nodes.
+
+Configurable values at present are:
+.RS
+.TP 20
+\fBacct_gather_energy/none\fR
+No energy consumption data is collected.
+.TP
+\fBacct_gather_energy/ipmi\fR
+Energy consumption data is collected from the Baseboard Management Controller
+(BMC) using the Intelligent Platform Management Interface (IPMI).
+.TP
+\fBacct_gather_energy/rapl\fR
+Energy consumption data is collected from hardware sensors using the Running
+Average Power Limit (RAPL) mechanism. Note that enabling RAPL may require the
+execution of the command "sudo modprobe msr".
+.RE
 
 .TP
 \fBAuthType\fR
@@ -312,6 +346,9 @@ BlueGene block wiring (switch state details)
 .TP
 \fBCPU_Bind\fR
 CPU binding details for jobs and steps
+.TP
+\fBEnergy\fR
+AcctGatherEnergy debug info
 .TP
 \fBFrontEnd\fR
 Front end node details
@@ -749,10 +786,14 @@ The value may not exceed 65533.
 \fBLaunchType\fR
 Identifies the mechanism to be used to launch application tasks.
 Acceptable values include
+"launch/aprun" for use with Cray systems with ALPS,
 "launch/poe" for use with IBM Parallel Environment (PE),
 "launch/runjob" for use with IBM BlueGene/Q systems, and
 "launch/slurm" for all other systems.
-The default value is "launch/runjob" for IBM BlueGene/Q systems and
+The default value is
+"launch/aprun" for Cray systems,
+"launch/poe" for systems with the IBM NRT library installed,
+"launch/runjob" for IBM BlueGene/Q systems, and
 "launch/slurm" for all other systems.
 
 .TP
