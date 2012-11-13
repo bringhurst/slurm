@@ -164,7 +164,8 @@ X_AC_PAM
 
 dnl
 dnl Check for LIBVIRT module support
-X_AC_LIBVIRT
+X_AC_XML2
+X_AC_VIRT
 
 dnl
 dnl Check for ISO compliance
