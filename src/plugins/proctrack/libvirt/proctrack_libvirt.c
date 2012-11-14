@@ -52,6 +52,11 @@
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
+#include "src/common/xlibvirt_read_config.h"
+
+#include "proctrack_libvirt_translate.h"
+#include "proctrack_libvirt_instantiate.h"
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -113,6 +118,12 @@ extern int fini (void)
 
 extern int slurm_container_plugin_create (slurmd_job_t *job)
 {
+	xlibvirt_domain_t* domain = \
+		xlibvirt_instantiate_domain(job, &slurm_libvirt_conf);
+
+	if(xlibvirt_boot_domain(domain) < 0)
+		return SLURM_ERROR;
+
 	return SLURM_SUCCESS;
 }
 

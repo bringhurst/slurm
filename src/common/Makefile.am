@@ -34,7 +34,7 @@ noinst_LTLIBRARIES = 			\
 libcommon_la_SOURCES = 			\
 	xcgroup_read_config.c xcgroup_read_config.h		\
 	xcgroup.c xcgroup.h 					\
-	xlibvirt.c xlibvirt.h		\
+	xlibvirt_read_config.c xlibvirt_read_config.h		\
 	xcpuinfo.c xcpuinfo.h 					\
 	cpu_frequency.c cpu_frequency.h \
 	assoc_mgr.c assoc_mgr.h 	\

@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  xlibvirt.c - libvirt related primitives
+ *  proctrack_libvirt_translate.c - libvirt related protocol translation
  *****************************************************************************
  *  Copyright (C) 2012 LANS
  *  Written by Jon Bringhurst <jonb@lanl.gov>
@@ -38,7 +38,7 @@
 #   include "config.h"
 #endif
 
-#include "xlibvirt.h"
+#include "proctrack_libvirt_translate.h"
 
 /*
  * Prototypes for internal functions

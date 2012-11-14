@@ -1,5 +1,5 @@
 /*****************************************************************************\
- *  xlibvirt.h - libvirt related primitives headers
+ *  proctrack_libvirt_translate.h - libvirt related protocol translation
  *****************************************************************************
  *  Copyright (C) 2012 LANS
  *  Written by Jon Bringhurst <jonb@lanl.gov>
