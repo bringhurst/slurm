@@ -45,13 +45,18 @@
  */
 xmlChar* _build_domain_xml(xlibvirt_domain_t* domain);
 xmlNodePtr _build_domain_xml_os(xlibvirt_domain_os_t* os);
-xmlNodePtr _build_domain_xml_device_console(xlibvirt_domain_device_console_t* console);
-xmlNodePtr _build_domain_xml_device_interface_source(xlibvirt_domain_device_interface_source_t* source);
-xmlNodePtr _build_domain_xml_device_interface(xlibvirt_domain_device_interface_t* interface);
-xmlNodePtr _build_domain_xml_device_filesystem(xlibvirt_domain_device_filesystem_t* filesystem);
+xmlNodePtr _build_domain_xml_device_console(
+	xlibvirt_domain_device_console_t* console);
+xmlNodePtr _build_domain_xml_device_interface_source(
+	xlibvirt_domain_device_interface_source_t* source);
+xmlNodePtr _build_domain_xml_device_interface(
+	xlibvirt_domain_device_interface_t* interface);
+xmlNodePtr _build_domain_xml_device_filesystem(
+	xlibvirt_domain_device_filesystem_t* filesystem);
 xmlNodePtr _build_domain_xml_device_pool(xlibvirt_domain_device_pool_t* pool);
 xmlNodePtr _build_domain_xml_devices(xlibvirt_domain_devices_t* devices);
-xmlNodePtr _build_domain_xml_elements(xlibvirt_domain_elements_t* elements, char* type);
+xmlNodePtr _build_domain_xml_elements(
+	xlibvirt_domain_elements_t* elements, char* type);
 
 int
 xlibvirt_boot_domain(xlibvirt_domain_t* domain) {
