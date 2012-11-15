@@ -3,7 +3,7 @@
 #    X_AC_XML2
 #
 #  DESCRIPTION:
-#    Test for LIBXML2. If found define XML2_LIBS
+#    Test for LIBXML2. If found define XML2_LIBS and XML2_CFLAGS
 ##*****************************************************************************
 
 AC_DEFUN([X_AC_XML2],
