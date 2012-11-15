@@ -34,8 +34,41 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include <sys/types.h>
+
 #include "proctrack_libvirt_instantiate.h"
 #include "proctrack_libvirt_translate.h"
+
+/* Internal function prototypes */
+xlibvirt_domain_os_t*
+_inst_domain_os(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_devices_t*
+_inst_domain_devices(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_device_console_t*
+_inst_domain_device_console(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_device_filesystem_t*
+_inst_domain_device_filesystem(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_elements_t*
+_inst_domain_elements(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_device_interface_t*
+_inst_domain_device_interface(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_device_filesystem_source_t*
+_inst_domain_device_filesystem_source(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_device_filesystem_target_t*
+_inst_domain_device_filesystem_target(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_device_interface_source_t*
+_inst_domain_device_interface_source(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
+
+xlibvirt_domain_t*
+_inst_domain(slurmd_job_t* job, slurm_libvirt_conf_t* conf);
 
 /*
  * Populate slurm libvirt domain structure with data associated with the job
@@ -43,46 +76,43 @@
  */
 xlibvirt_domain_t*
 xlibvirt_instantiate_domain(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
-
+	return _inst_domain(job, conf);
 }
 
-/* prototypes */
-xlibvirt_domain_os_t* build_domain_os();
-xlibvirt_domain_devices_t* build_domain_devices();
-xlibvirt_domain_device_console_t* build_domain_device_console();
-xlibvirt_domain_device_filesystem_t* build_domain_device_filesystem();
-xlibvirt_domain_device_filesystem_source_t* build_domain_device_filesystem_source();
-xlibvirt_domain_device_filesystem_target_t* build_domain_device_filesystem_target();
-xlibvirt_domain_device_interface_t* build_domain_device_interface();
-xlibvirt_domain_device_interface_source_t* build_domain_device_interface_source();
-xlibvirt_domain_elements_t* build_domain_elements();
-xlibvirt_domain_t* build_domain();
+/****************************************************************************
+ * Internal functions.
+ ****************************************************************************/
 
-
-xlibvirt_domain_os_t* build_domain_os() {
+xlibvirt_domain_os_t* _inst_domain_os(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
 	/*
 	<os>
 		<type>exe</type>
 		<init>/bin/bash</init>
 	</os>
 	*/
+	uint32_t init_argc, argv_off = 0;
+	char* init_cmd_buf = (char*) malloc(sizeof(char) * 4096); /* FIXME */
 
 	xlibvirt_domain_os_t* os = (xlibvirt_domain_os_t*) malloc(sizeof(xlibvirt_domain_os_t));
 
+	for(init_argc = job->argc; init_argc >= 0; init_argc--) {
+		argv_off += sprintf(init_cmd_buf + argv_off, \
+			"%s ", job->argv[init_argc]);
+	}
+
 	os->type = "exe";
-	os->init = "/bin/bash";
+	os->init = init_cmd_buf;
 
 	return os;
 }
 
-xlibvirt_domain_devices_t* build_domain_devices() {
+xlibvirt_domain_devices_t* _inst_domain_devices(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
 	/*
 	<devices>
 		<emulator>/usr/lib/libvirt/libvirt_lxc</emulator>
 		...
 	</devices>
 	*/
-
 	xlibvirt_domain_devices_t* devices =
 		(xlibvirt_domain_devices_t*) malloc(sizeof(xlibvirt_domain_devices_t));
 
@@ -92,9 +122,9 @@ xlibvirt_domain_devices_t* build_domain_devices() {
 	devices->filesystems = (xlibvirt_domain_device_filesystem_t**) malloc(sizeof(xlibvirt_domain_device_console_t*));
 	devices->consoles = (xlibvirt_domain_device_console_t**) malloc(sizeof(xlibvirt_domain_device_console_t*));
 
-	devices->interfaces[0] = build_domain_device_interface();
-	devices->filesystems[0] = build_domain_device_filesystem();
-	devices->consoles[0] = build_domain_device_console();
+	devices->interfaces[0] = _inst_domain_device_interface(job, conf);
+	devices->filesystems[0] = _inst_domain_device_filesystem(job, conf);
+	devices->consoles[0] = _inst_domain_device_console(job, conf);
 
 	devices->interface_count = 1;
 	devices->filesystem_count = 1;
@@ -104,11 +134,10 @@ xlibvirt_domain_devices_t* build_domain_devices() {
 	return devices;
 }
 
-xlibvirt_domain_device_console_t* build_domain_device_console() {
+xlibvirt_domain_device_console_t* _inst_domain_device_console(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
         /*
 	<console type='pty' />
         */
-
 	xlibvirt_domain_device_console_t* console =
 		(xlibvirt_domain_device_console_t*) malloc(sizeof(xlibvirt_domain_device_console_t));
 
@@ -117,29 +146,27 @@ xlibvirt_domain_device_console_t* build_domain_device_console() {
         return console;
 }
 
-xlibvirt_domain_device_filesystem_t* build_domain_device_filesystem() {
+xlibvirt_domain_device_filesystem_t* _inst_domain_device_filesystem(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
         /*
 	<filesystem type='mount'>
 	...
 	</filesystem>
         */
-
 	xlibvirt_domain_device_filesystem_t* filesystem =
 		(xlibvirt_domain_device_filesystem_t*) malloc(sizeof(xlibvirt_domain_device_filesystem_t));
 
 	filesystem->type = "mount";
 
-	filesystem->source = build_domain_device_filesystem_source();
-	filesystem->target = build_domain_device_filesystem_target();
+	filesystem->source = _inst_domain_device_filesystem_source(job, conf);
+	filesystem->target = _inst_domain_device_filesystem_target(job, conf);
 
         return filesystem;
 }
 
-xlibvirt_domain_device_filesystem_source_t* build_domain_device_filesystem_source() {
+xlibvirt_domain_device_filesystem_source_t* _inst_domain_device_filesystem_source(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
         /*
 	<source dir='/'/>
         */
-
 	xlibvirt_domain_device_filesystem_source_t* source =
 		(xlibvirt_domain_device_filesystem_source_t*) malloc(sizeof(xlibvirt_domain_device_filesystem_source_t));
 
@@ -148,11 +175,10 @@ xlibvirt_domain_device_filesystem_source_t* build_domain_device_filesystem_sourc
         return source;
 }
 
-xlibvirt_domain_device_filesystem_target_t* build_domain_device_filesystem_target() {
+xlibvirt_domain_device_filesystem_target_t* _inst_domain_device_filesystem_target(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
         /*
 	<target dir='/'/>
         */
-
 	xlibvirt_domain_device_filesystem_target_t* target =
 		(xlibvirt_domain_device_filesystem_target_t*) malloc(sizeof(xlibvirt_domain_device_filesystem_target_t));
 
@@ -161,13 +187,12 @@ xlibvirt_domain_device_filesystem_target_t* build_domain_device_filesystem_targe
         return target;
 }
 
-xlibvirt_domain_device_interface_t* build_domain_device_interface() {
+xlibvirt_domain_device_interface_t* _inst_domain_device_interface(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
 	/*
 	<interface type='network'>
 	...
 	</interface>
 	*/
-
 	xlibvirt_domain_device_interface_t* interface =
 		(xlibvirt_domain_device_interface_t*) malloc(sizeof(xlibvirt_domain_device_interface_t));
 
@@ -176,16 +201,15 @@ xlibvirt_domain_device_interface_t* build_domain_device_interface() {
 	interface->sources = (xlibvirt_domain_device_interface_source_t**) malloc(sizeof(xlibvirt_domain_device_interface_source_t*));
 
 	interface->source_count = 1;
-	interface->sources[0] = build_domain_device_interface_source();
+	interface->sources[0] = _inst_domain_device_interface_source(job, conf);
 
 	return interface;
 }
 
-xlibvirt_domain_device_interface_source_t* build_domain_device_interface_source() {
+xlibvirt_domain_device_interface_source_t* _inst_domain_device_interface_source(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
 	/*
 	<source network='default'/>
 	*/
-
 	xlibvirt_domain_device_interface_source_t* source =
 		(xlibvirt_domain_device_interface_source_t*) malloc(sizeof(xlibvirt_domain_device_interface_source_t));
 	source->network = "default";
@@ -193,7 +217,7 @@ xlibvirt_domain_device_interface_source_t* build_domain_device_interface_source(
 	return source;
 }
 
-xlibvirt_domain_elements_t* build_domain_elements() {
+xlibvirt_domain_elements_t* _inst_domain_elements(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
 	/*
 	<name>vm1</name>
 	<memory>30000</memory>
@@ -204,11 +228,11 @@ xlibvirt_domain_elements_t* build_domain_elements() {
 	<on_crash>destroy</on_crash>
 	...
 	*/
-
 	xlibvirt_domain_elements_t* elements =
 		(xlibvirt_domain_elements_t*) malloc(sizeof(xlibvirt_domain_elements_t));
 
-	elements->name = "domaingen_test_domain";
+
+	elements->name = itoa(job->jobid);
 	elements->clock_offset = "utc";
 
 	elements->memory = "30000";
@@ -218,35 +242,23 @@ xlibvirt_domain_elements_t* build_domain_elements() {
         elements->on_reboot = "restart";
         elements->on_crash = "destroy";
 
-	elements->os = build_domain_os();
-	elements->devices = build_domain_devices();
+	elements->os = _inst_domain_os(job, conf);
+	elements->devices = _inst_domain_devices(job, conf);
 
 	return elements;
 }
 
-xlibvirt_domain_t* build_domain() {
+xlibvirt_domain_t* _inst_domain(slurmd_job_t* job, slurm_libvirt_conf_t* conf) {
 	/*
 	<domain type='lxc'>
 	...
 	</domain>
 	*/
-
 	xlibvirt_domain_t* domain =
 		(xlibvirt_domain_t*) malloc(sizeof(xlibvirt_domain_t));
 
 	domain->type = "lxc";
-	domain->opts = build_domain_elements();
+	domain->opts = _inst_domain_elements(job, conf);
 
 	return domain;
 }
-
-int main(void) {
-	xlibvirt_domain_t* domain;
-
-	domain = build_domain();
-	xlibvirt_boot_domain(domain);
-
-	return 0;
-}
-
-/* EOF */
